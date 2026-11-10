@@ -19,7 +19,7 @@ function record(options: TipOptions): TipRecord {
 describe('serializeNativeTip', () => {
   it('produces plain values with processed colors from the resolved theme', () => {
     const config = serializeNativeTip(
-      record({ title: 'Filters', message: 'Narrow results', icon: '★', actions: [{ label: 'Got it', style: 'primary' }] }),
+      record({ title: 'Filters', message: 'Narrow results', icon: '✦', actions: [{ label: 'Got it', style: 'primary' }] }),
       { theme: { colors: { accent: '#ff0000' } } },
       'light',
     );
@@ -27,7 +27,7 @@ describe('serializeNativeTip', () => {
     expect(config).toMatchObject({
       title: 'Filters',
       message: 'Narrow results',
-      icon: '★',
+      icon: '✦',
       placement: 'auto',
       align: 'center',
       showArrow: true,
@@ -43,9 +43,16 @@ describe('serializeNativeTip', () => {
     });
     const style = config.style as Record<string, unknown>;
     expect(typeof style.backgroundColor).toBe('number');
-    expect(style.primaryBackgroundColor).toBe(style.iconColor);
+    expect(style.iconColor).toBe(style.primaryBackgroundColor);
     expect(style.arrowSize).toBe(8);
     expect(JSON.parse(JSON.stringify(config))).toEqual(config);
+  });
+
+  it('turns off outside presses for spotlight tips, which block touches anyway', () => {
+    expect(serializeNativeTip(record({ spotlight: true }), {}, 'light')).toMatchObject({
+      spotlight: true,
+      dismissOnOutsidePress: false,
+    });
   });
 
   it('applies variants and the dark scheme', () => {
@@ -56,12 +63,9 @@ describe('serializeNativeTip', () => {
     expect(style({}, 'dark').backgroundColor).not.toBe(style({}).backgroundColor);
   });
 
-  it('never dismisses spotlight tips on outside touches and drops React-only content', () => {
-    const config = serializeNativeTip(
-      record({ spotlight: true, icon: null, showArrow: false, theme: { layout: { arrowSize: 12 } } }),
-      {},
-      'light',
-    );
-    expect(config).toMatchObject({ spotlight: true, dismissOnOutsidePress: false, icon: null, showArrow: false });
+  it('drops React-only content', () => {
+    const config = serializeNativeTip(record({ icon: null, showArrow: false }), {}, 'light');
+    expect(config.icon).toBeNull();
+    expect(config.showArrow).toBe(false);
   });
 });

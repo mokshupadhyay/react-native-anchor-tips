@@ -2,43 +2,30 @@
 
 #import <React/RCTConvert.h>
 
-static const CGFloat AnchorTipIconGap = 10;
-static const CGFloat AnchorTipCloseSize = 14;
-static const CGFloat AnchorTipCloseGap = 12;
-static const CGFloat AnchorTipTitleGap = 3;
-static const CGFloat AnchorTipFooterGap = 12;
-static const CGFloat AnchorTipActionGap = 16;
-static const CGFloat AnchorTipStepGap = 12;
-
-CGFloat AnchorTipNumber(NSDictionary *dict, NSString *key, CGFloat fallback)
+static CGFloat AnchorTipNumber(NSDictionary *dict, NSString *key, CGFloat fallback)
 {
   id value = dict[key];
   return [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : fallback;
 }
 
-BOOL AnchorTipBool(NSDictionary *dict, NSString *key, BOOL fallback)
+static BOOL AnchorTipBool(NSDictionary *dict, NSString *key, BOOL fallback)
 {
   id value = dict[key];
   return [value isKindOfClass:[NSNumber class]] ? [value boolValue] : fallback;
 }
 
-NSString *AnchorTipString(NSDictionary *dict, NSString *key)
+static NSString *_Nullable AnchorTipString(NSDictionary *dict, NSString *key)
 {
   id value = dict[key];
   return [value isKindOfClass:[NSString class]] && [value length] > 0 ? value : nil;
 }
 
-UIColor *AnchorTipColor(NSDictionary *dict, NSString *key, UIColor *fallback)
+static UIColor *AnchorTipColor(NSDictionary *dict, NSString *key, UIColor *fallback)
 {
   id value = dict[key];
   if (value == nil || value == [NSNull null]) return fallback;
-  return [RCTConvert UIColor:value] ?: fallback;
-}
-
-NSDictionary *AnchorTipStyle(NSDictionary *config)
-{
-  id style = config[@"style"];
-  return [style isKindOfClass:[NSDictionary class]] ? style : @{};
+  UIColor *color = [RCTConvert UIColor:value];
+  return color ?: fallback;
 }
 
 static UIFontWeight AnchorTipFontWeight(NSString *_Nullable weight)
@@ -61,81 +48,155 @@ static UIFont *AnchorTipFont(NSString *_Nullable family, CGFloat size, NSString 
   return [UIFont systemFontOfSize:size weight:AnchorTipFontWeight(weight)];
 }
 
-static CGSize AnchorTipLabelSize(UILabel *label, CGFloat maxWidth)
+/** Rounded rect with the arrow notched into the edge that faces the anchor, clockwise. */
+static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipSide side, CGFloat offset, CGFloat arrow)
 {
-  if (label.hidden || maxWidth <= 0) return CGSizeZero;
-  CGSize size = [label sizeThatFits:CGSizeMake(maxWidth, CGFLOAT_MAX)];
-  return CGSizeMake(MIN(ceil(size.width), maxWidth), ceil(size.height));
+  CGFloat w = size.width;
+  CGFloat h = size.height;
+  CGFloat r = MIN(radius, MIN(w, h) / 2);
+  BOOL hasArrow = arrow > 0;
+  UIBezierPath *path = [UIBezierPath bezierPath];
+  [path moveToPoint:CGPointMake(r, 0)];
+  if (hasArrow && side == AnchorTipSideBottom) {
+    [path addLineToPoint:CGPointMake(offset - arrow, 0)];
+    [path addLineToPoint:CGPointMake(offset, -arrow)];
+    [path addLineToPoint:CGPointMake(offset + arrow, 0)];
+  }
+  [path addLineToPoint:CGPointMake(w - r, 0)];
+  [path addArcWithCenter:CGPointMake(w - r, r) radius:r startAngle:-M_PI_2 endAngle:0 clockwise:YES];
+  if (hasArrow && side == AnchorTipSideLeft) {
+    [path addLineToPoint:CGPointMake(w, offset - arrow)];
+    [path addLineToPoint:CGPointMake(w + arrow, offset)];
+    [path addLineToPoint:CGPointMake(w, offset + arrow)];
+  }
+  [path addLineToPoint:CGPointMake(w, h - r)];
+  [path addArcWithCenter:CGPointMake(w - r, h - r) radius:r startAngle:0 endAngle:M_PI_2 clockwise:YES];
+  if (hasArrow && side == AnchorTipSideTop) {
+    [path addLineToPoint:CGPointMake(offset + arrow, h)];
+    [path addLineToPoint:CGPointMake(offset, h + arrow)];
+    [path addLineToPoint:CGPointMake(offset - arrow, h)];
+  }
+  [path addLineToPoint:CGPointMake(r, h)];
+  [path addArcWithCenter:CGPointMake(r, h - r) radius:r startAngle:M_PI_2 endAngle:M_PI clockwise:YES];
+  if (hasArrow && side == AnchorTipSideRight) {
+    [path addLineToPoint:CGPointMake(0, offset + arrow)];
+    [path addLineToPoint:CGPointMake(-arrow, offset)];
+    [path addLineToPoint:CGPointMake(0, offset - arrow)];
+  }
+  [path addLineToPoint:CGPointMake(0, r)];
+  [path addArcWithCenter:CGPointMake(r, r) radius:r startAngle:M_PI endAngle:3 * M_PI_2 clockwise:YES];
+  [path closePath];
+  return path;
 }
-
-/** Measured pieces of the layout for one width. */
-typedef struct {
-  CGSize icon;
-  CGSize title;
-  CGSize message;
-  CGFloat textWidth;
-  CGFloat rowHeight;
-  CGSize step;
-  CGFloat footerWidth;
-  CGFloat footerHeight;
-  BOOL hasFooter;
-} AnchorTipMetrics;
-
-@interface AnchorTipView () <UIGestureRecognizerDelegate>
-@end
 
 @implementation AnchorTipView {
   NSDictionary *_style;
   CAShapeLayer *_shape;
+  UIStackView *_content;
+  NSArray<NSLayoutConstraint *> *_paddingConstraints;
+  UIStackView *_row;
   UILabel *_iconLabel;
+  UIStackView *_textStack;
   UILabel *_titleLabel;
   UILabel *_messageLabel;
   UIButton *_closeButton;
+  UIStackView *_footer;
   UILabel *_stepLabel;
-  NSMutableArray<UIButton *> *_actionButtons;
-  NSMutableArray<NSValue *> *_actionSizes;
+  UIStackView *_actionsStack;
+  NSMutableArray<UIButton *> *_primaryButtons;
+  AnchorTipSide _side;
   CGFloat _arrowOffset;
-  CGFloat _arrowSize;
 }
 
 - (instancetype)initWithTipId:(NSString *)tipId config:(NSDictionary *)config
 {
   if (self = [super initWithFrame:CGRectZero]) {
     _tipId = [tipId copy];
-    _placement = AnchorTipPlacementBottom;
-    _actionButtons = [NSMutableArray new];
-    _actionSizes = [NSMutableArray new];
-
-    _shape = [CAShapeLayer layer];
-    [self.layer insertSublayer:_shape atIndex:0];
-
-    _iconLabel = [UILabel new];
-    _iconLabel.textAlignment = NSTextAlignmentCenter;
-    _titleLabel = [UILabel new];
-    _titleLabel.numberOfLines = 0;
-    _messageLabel = [UILabel new];
-    _messageLabel.numberOfLines = 0;
-    _stepLabel = [UILabel new];
-
-    _closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [_closeButton setTitle:@"\u2715" forState:UIControlStateNormal];
-    _closeButton.titleLabel.font = [UIFont systemFontOfSize:AnchorTipCloseSize];
-    _closeButton.accessibilityLabel = @"Dismiss";
-    [_closeButton addTarget:self action:@selector(handleClose) forControlEvents:UIControlEventTouchUpInside];
-
-    for (UIView *view in @[ _iconLabel, _titleLabel, _messageLabel, _stepLabel, _closeButton ]) {
-      [self addSubview:view];
-    }
+    _primaryButtons = [NSMutableArray new];
+    _side = AnchorTipSideBottom;
+    [self buildHierarchy];
+    [self applyConfig:config];
 
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap)];
-    tap.cancelsTouchesInView = NO;
-    tap.delegate = self;
     [self addGestureRecognizer:tap];
-
-    self.isAccessibilityElement = NO;
-    [self applyConfig:config];
   }
   return self;
+}
+
+#pragma mark - Hierarchy
+
+- (void)buildHierarchy
+{
+  self.backgroundColor = UIColor.clearColor;
+  self.clipsToBounds = NO;
+  self.isAccessibilityElement = NO;
+
+  _shape = [CAShapeLayer layer];
+  [self.layer insertSublayer:_shape atIndex:0];
+
+  _content = [UIStackView new];
+  _content.translatesAutoresizingMaskIntoConstraints = NO;
+  _content.axis = UILayoutConstraintAxisVertical;
+  _content.alignment = UIStackViewAlignmentFill;
+  _content.spacing = 12;
+  [self addSubview:_content];
+  _paddingConstraints = @[
+    [_content.topAnchor constraintEqualToAnchor:self.topAnchor constant:14],
+    [_content.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:14],
+    [self.trailingAnchor constraintEqualToAnchor:_content.trailingAnchor constant:14],
+    [self.bottomAnchor constraintEqualToAnchor:_content.bottomAnchor constant:14],
+  ];
+  [NSLayoutConstraint activateConstraints:_paddingConstraints];
+
+  _row = [UIStackView new];
+  _row.axis = UILayoutConstraintAxisHorizontal;
+  _row.alignment = UIStackViewAlignmentTop;
+  _row.spacing = 10;
+  [_content addArrangedSubview:_row];
+
+  _iconLabel = [UILabel new];
+  [_iconLabel setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [_iconLabel setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [_row addArrangedSubview:_iconLabel];
+
+  _textStack = [UIStackView new];
+  _textStack.axis = UILayoutConstraintAxisVertical;
+  _textStack.alignment = UIStackViewAlignmentLeading;
+  _textStack.spacing = 3;
+  [_textStack setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+  _titleLabel = [UILabel new];
+  _titleLabel.numberOfLines = 0;
+  _messageLabel = [UILabel new];
+  _messageLabel.numberOfLines = 0;
+  [_textStack addArrangedSubview:_titleLabel];
+  [_textStack addArrangedSubview:_messageLabel];
+  [_row addArrangedSubview:_textStack];
+
+  _closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+  [_closeButton setTitle:@"\u2715" forState:UIControlStateNormal];
+  _closeButton.titleLabel.font = [UIFont systemFontOfSize:14];
+  _closeButton.accessibilityLabel = @"Dismiss";
+  [_closeButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [_closeButton setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [_closeButton addTarget:self action:@selector(handleClose) forControlEvents:UIControlEventTouchUpInside];
+  [_row addArrangedSubview:_closeButton];
+
+  _footer = [UIStackView new];
+  _footer.axis = UILayoutConstraintAxisHorizontal;
+  _footer.alignment = UIStackViewAlignmentCenter;
+  _footer.spacing = 12;
+  [_content addArrangedSubview:_footer];
+
+  _stepLabel = [UILabel new];
+  [_stepLabel setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
+  [_footer addArrangedSubview:_stepLabel];
+
+  _actionsStack = [UIStackView new];
+  _actionsStack.axis = UILayoutConstraintAxisHorizontal;
+  _actionsStack.alignment = UIStackViewAlignmentCenter;
+  _actionsStack.spacing = 16;
+  [_actionsStack setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
+  [_footer addArrangedSubview:_actionsStack];
 }
 
 #pragma mark - Config
@@ -143,9 +204,12 @@ typedef struct {
 - (void)applyConfig:(NSDictionary *)config
 {
   _config = [config copy];
-  _style = AnchorTipStyle(config);
-  NSDictionary *style = _style;
-  NSString *family = AnchorTipString(style, @"fontFamily");
+  NSDictionary *style = [config[@"style"] isKindOfClass:[NSDictionary class]] ? config[@"style"] : @{};
+  _style = style;
+  NSString *fontFamily = AnchorTipString(style, @"fontFamily");
+
+  CGFloat padding = AnchorTipNumber(style, @"padding", 14);
+  for (NSLayoutConstraint *constraint in _paddingConstraints) constraint.constant = padding;
 
   _shape.fillColor = AnchorTipColor(style, @"backgroundColor", UIColor.whiteColor).CGColor;
   CGFloat borderWidth = AnchorTipNumber(style, @"borderWidth", 0);
@@ -172,12 +236,11 @@ typedef struct {
   _titleLabel.hidden = title == nil;
   _titleLabel.text = title;
   _titleLabel.textColor = AnchorTipColor(style, @"titleColor", UIColor.blackColor);
-  _titleLabel.font = AnchorTipFont(family, AnchorTipNumber(style, @"titleFontSize", 15), AnchorTipString(style, @"titleFontWeight"));
+  _titleLabel.font = AnchorTipFont(fontFamily, AnchorTipNumber(style, @"titleFontSize", 15), AnchorTipString(style, @"titleFontWeight"));
 
   NSString *message = AnchorTipString(config, @"message");
   _messageLabel.hidden = message == nil;
   CGFloat messageSize = AnchorTipNumber(style, @"messageFontSize", 14);
-  UIFont *messageFont = AnchorTipFont(family, messageSize, @"400");
   if (message != nil) {
     NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
     paragraph.minimumLineHeight = round(messageSize * 1.35);
@@ -185,7 +248,7 @@ typedef struct {
     _messageLabel.attributedText = [[NSAttributedString alloc]
         initWithString:message
             attributes:@{
-              NSFontAttributeName : messageFont,
+              NSFontAttributeName : AnchorTipFont(fontFamily, messageSize, @"400"),
               NSForegroundColorAttributeName : AnchorTipColor(style, @"messageColor", UIColor.darkGrayColor),
               NSParagraphStyleAttributeName : paragraph,
             }];
@@ -197,25 +260,26 @@ typedef struct {
   _closeButton.tintColor = AnchorTipColor(style, @"closeColor", UIColor.grayColor);
 
   NSString *step = AnchorTipString(config, @"stepLabel");
-  _stepLabel.hidden = step == nil;
   _stepLabel.text = step;
   _stepLabel.textColor = AnchorTipColor(style, @"stepColor", UIColor.grayColor);
-  _stepLabel.font = AnchorTipFont(family, AnchorTipNumber(style, @"stepFontSize", 13), @"400");
+  _stepLabel.font = AnchorTipFont(fontFamily, AnchorTipNumber(style, @"stepFontSize", 13), @"400");
 
-  [self rebuildActionsWithFamily:family];
+  [self rebuildActions:config style:style fontFamily:fontFamily];
+  _footer.hidden = step == nil && _actionsStack.arrangedSubviews.count == 0;
 
-  self.accessibilityLabel = AnchorTipString(config, @"accessibilityLabel");
+  NSString *label = AnchorTipString(config, @"accessibilityLabel");
+  self.accessibilityLabel = label;
   [self setNeedsLayout];
 }
 
-- (void)rebuildActionsWithFamily:(NSString *)family
+- (void)rebuildActions:(NSDictionary *)config style:(NSDictionary *)style fontFamily:(NSString *)fontFamily
 {
-  for (UIButton *button in _actionButtons) [button removeFromSuperview];
-  [_actionButtons removeAllObjects];
-  [_actionSizes removeAllObjects];
-
-  NSDictionary *style = _style;
-  NSArray *actions = [_config[@"actions"] isKindOfClass:[NSArray class]] ? _config[@"actions"] : @[];
+  for (UIView *view in _actionsStack.arrangedSubviews) {
+    [_actionsStack removeArrangedSubview:view];
+    [view removeFromSuperview];
+  }
+  [_primaryButtons removeAllObjects];
+  NSArray *actions = [config[@"actions"] isKindOfClass:[NSArray class]] ? config[@"actions"] : @[];
   CGFloat size = AnchorTipNumber(style, @"actionFontSize", 15);
   NSString *weight = AnchorTipString(style, @"actionFontWeight");
   for (NSUInteger index = 0; index < actions.count; index++) {
@@ -223,182 +287,87 @@ typedef struct {
     if (![action isKindOfClass:[NSDictionary class]]) continue;
     NSString *actionStyle = AnchorTipString(action, @"style") ?: @"default";
     BOOL primary = [actionStyle isEqualToString:@"primary"];
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     UIColor *color = primary ? AnchorTipColor(style, @"primaryTextColor", UIColor.whiteColor)
         : [actionStyle isEqualToString:@"destructive"] ? AnchorTipColor(style, @"destructiveColor", UIColor.systemRedColor)
                                                         : AnchorTipColor(style, @"actionColor", UIColor.systemBlueColor);
-    UIFont *font = AnchorTipFont(family, size, [actionStyle isEqualToString:@"cancel"] ? @"400" : weight);
-
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
     [button setTitle:AnchorTipString(action, @"label") forState:UIControlStateNormal];
     [button setTitleColor:color forState:UIControlStateNormal];
-    [button setTitleColor:[color colorWithAlphaComponent:0.5] forState:UIControlStateHighlighted];
-    button.titleLabel.font = font;
-    button.tag = (NSInteger)index;
-    [button addTarget:self action:@selector(handleAction:) forControlEvents:UIControlEventTouchUpInside];
-
-    CGSize text = [[button titleForState:UIControlStateNormal] ?: @"" sizeWithAttributes:@{NSFontAttributeName : font}];
-    CGSize buttonSize = primary ? CGSizeMake(ceil(text.width) + 28, ceil(text.height) + 14)
-                                : CGSizeMake(ceil(text.width), ceil(text.height) + 8);
+    button.titleLabel.font = AnchorTipFont(fontFamily, size, [actionStyle isEqualToString:@"cancel"] ? @"400" : weight);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    button.contentEdgeInsets = primary ? UIEdgeInsetsMake(7, 14, 7, 14) : UIEdgeInsetsMake(4, 0, 4, 0);
+#pragma clang diagnostic pop
     if (primary) {
       button.backgroundColor = AnchorTipColor(style, @"primaryBackgroundColor", UIColor.systemBlueColor);
-      button.layer.cornerRadius = buttonSize.height / 2;
+      button.clipsToBounds = YES;
+      [_primaryButtons addObject:button];
     }
-    [self addSubview:button];
-    [_actionButtons addObject:button];
-    [_actionSizes addObject:[NSValue valueWithCGSize:buttonSize]];
+    button.tag = (NSInteger)index;
+    [button addTarget:self action:@selector(handleAction:) forControlEvents:UIControlEventTouchUpInside];
+    [_actionsStack addArrangedSubview:button];
   }
+  _actionsStack.hidden = _actionsStack.arrangedSubviews.count == 0;
 }
 
 #pragma mark - Layout
 
-- (CGFloat)padding
-{
-  return AnchorTipNumber(_style, @"padding", 14);
-}
-
-- (AnchorTipMetrics)metricsForWidth:(CGFloat)width fitting:(BOOL)fitting
-{
-  AnchorTipMetrics metrics;
-  CGFloat inner = MAX(0, width - 2 * [self padding]);
-  metrics.icon = AnchorTipLabelSize(_iconLabel, inner);
-  CGFloat iconWidth = _iconLabel.hidden ? 0 : metrics.icon.width + AnchorTipIconGap;
-  CGFloat closeWidth = _closeButton.hidden ? 0 : AnchorTipCloseSize + AnchorTipCloseGap;
-  CGFloat textMax = MAX(0, inner - iconWidth - closeWidth);
-  metrics.title = AnchorTipLabelSize(_titleLabel, textMax);
-  metrics.message = AnchorTipLabelSize(_messageLabel, textMax);
-  metrics.textWidth = fitting ? MAX(metrics.title.width, metrics.message.width) : textMax;
-  CGFloat gap = (!_titleLabel.hidden && !_messageLabel.hidden) ? AnchorTipTitleGap : 0;
-  CGFloat textHeight = metrics.title.height + gap + metrics.message.height;
-  metrics.rowHeight = MAX(textHeight, MAX(metrics.icon.height, _closeButton.hidden ? 0 : AnchorTipCloseSize + 2));
-
-  metrics.step = AnchorTipLabelSize(_stepLabel, inner);
-  CGFloat actionsWidth = 0;
-  CGFloat actionsHeight = 0;
-  for (NSUInteger index = 0; index < _actionSizes.count; index++) {
-    CGSize size = _actionSizes[index].CGSizeValue;
-    actionsWidth += size.width + (index > 0 ? AnchorTipActionGap : 0);
-    actionsHeight = MAX(actionsHeight, size.height);
-  }
-  metrics.hasFooter = _actionSizes.count > 0 || !_stepLabel.hidden;
-  metrics.footerWidth = metrics.step.width + (!_stepLabel.hidden && _actionSizes.count > 0 ? AnchorTipStepGap : 0) + actionsWidth;
-  metrics.footerHeight = MAX(metrics.step.height, actionsHeight);
-  return metrics;
-}
-
 - (CGSize)fittingSizeForMaxWidth:(CGFloat)maxWidth
 {
-  CGFloat padding = [self padding];
-  AnchorTipMetrics metrics = [self metricsForWidth:maxWidth fitting:YES];
-  CGFloat iconWidth = _iconLabel.hidden ? 0 : metrics.icon.width + AnchorTipIconGap;
-  CGFloat closeWidth = _closeButton.hidden ? 0 : AnchorTipCloseSize + AnchorTipCloseGap;
-  CGFloat rowWidth = iconWidth + metrics.textWidth + closeWidth;
-  CGFloat width = MIN(maxWidth, ceil(MAX(rowWidth, metrics.footerWidth) + 2 * padding));
-  // Text wraps differently at the final width; measure the height there.
-  AnchorTipMetrics final = [self metricsForWidth:width fitting:NO];
-  CGFloat height = 2 * padding + final.rowHeight + (final.hasFooter ? AnchorTipFooterGap + final.footerHeight : 0);
-  return CGSizeMake(width, ceil(height));
+  CGFloat padding = AnchorTipNumber(_style, @"padding", 14);
+  _titleLabel.preferredMaxLayoutWidth = 0;
+  _messageLabel.preferredMaxLayoutWidth = 0;
+  CGSize natural = [_content systemLayoutSizeFittingSize:UILayoutFittingCompressedSize];
+  CGFloat width = MIN(ceil(natural.width) + 2 * padding, maxWidth);
+  CGFloat inner = MAX(0, width - 2 * padding);
+
+  CGFloat textWidth = inner;
+  if (!_iconLabel.hidden) textWidth -= _iconLabel.intrinsicContentSize.width + _row.spacing;
+  if (!_closeButton.hidden) textWidth -= _closeButton.intrinsicContentSize.width + _row.spacing;
+  _titleLabel.preferredMaxLayoutWidth = MAX(0, textWidth);
+  _messageLabel.preferredMaxLayoutWidth = MAX(0, textWidth);
+
+  CGSize fitted = [_content systemLayoutSizeFittingSize:CGSizeMake(inner, UILayoutFittingCompressedSize.height)
+                          withHorizontalFittingPriority:UILayoutPriorityRequired
+                                verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
+  return CGSizeMake(width, ceil(fitted.height) + 2 * padding);
+}
+
+- (void)applyPlacement:(AnchorTipPlacement)placement size:(CGSize)size
+{
+  _side = placement.side;
+  _arrowOffset = placement.arrowOffset;
+  CGAffineTransform transform = self.transform;
+  self.transform = CGAffineTransformIdentity;
+  self.frame = CGRectMake(placement.x, placement.y, size.width, size.height);
+  self.transform = transform;
+  [self updateShape];
+}
+
+- (void)updateShape
+{
+  BOOL showArrow = AnchorTipBool(_config, @"showArrow", YES);
+  CGFloat arrow = showArrow ? AnchorTipNumber(_style, @"arrowSize", 8) : 0;
+  CGFloat radius = AnchorTipNumber(_style, @"borderRadius", 14);
+  UIBezierPath *path = AnchorTipBubblePath(self.bounds.size, radius, _side, _arrowOffset, arrow);
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  _shape.frame = self.bounds;
+  _shape.path = path.CGPath;
+  [CATransaction commit];
+  self.layer.shadowPath = path.CGPath;
 }
 
 - (void)layoutSubviews
 {
   [super layoutSubviews];
-  CGFloat width = self.bounds.size.width;
-  CGFloat padding = [self padding];
-  AnchorTipMetrics metrics = [self metricsForWidth:width fitting:NO];
-
-  CGFloat x = padding;
-  if (!_iconLabel.hidden) {
-    _iconLabel.frame = CGRectMake(x, padding, metrics.icon.width, metrics.icon.height);
-    x += metrics.icon.width + AnchorTipIconGap;
-  }
-  _titleLabel.frame = CGRectMake(x, padding, metrics.textWidth, metrics.title.height);
-  CGFloat messageY = padding + metrics.title.height + (_titleLabel.hidden ? 0 : AnchorTipTitleGap);
-  _messageLabel.frame = CGRectMake(x, messageY, metrics.textWidth, metrics.message.height);
-  _closeButton.frame = CGRectMake(width - padding - AnchorTipCloseSize - 6, padding - 6, AnchorTipCloseSize + 12, AnchorTipCloseSize + 12);
-
-  if (metrics.hasFooter) {
-    CGFloat footerY = padding + metrics.rowHeight + AnchorTipFooterGap;
-    _stepLabel.frame = CGRectMake(padding, footerY + (metrics.footerHeight - metrics.step.height) / 2, metrics.step.width, metrics.step.height);
-    CGFloat right = width - padding;
-    for (NSInteger index = (NSInteger)_actionButtons.count - 1; index >= 0; index--) {
-      CGSize size = _actionSizes[(NSUInteger)index].CGSizeValue;
-      _actionButtons[(NSUInteger)index].frame =
-          CGRectMake(right - size.width, footerY + (metrics.footerHeight - size.height) / 2, size.width, size.height);
-      right -= size.width + AnchorTipActionGap;
-    }
+  for (UIButton *button in _primaryButtons) {
+    button.layer.cornerRadius = button.bounds.size.height / 2;
   }
   [self updateShape];
-}
-
-- (void)setPlacement:(AnchorTipPlacement)placement arrowOffset:(CGFloat)arrowOffset arrowSize:(CGFloat)arrowSize
-{
-  _placement = placement;
-  _arrowOffset = arrowOffset;
-  _arrowSize = arrowSize;
-  [self updateShape];
-}
-
-/** The rounded body with the arrow traced into the edge that faces the anchor. */
-- (UIBezierPath *)bubblePath
-{
-  CGFloat w = self.bounds.size.width;
-  CGFloat h = self.bounds.size.height;
-  CGFloat r = MIN(AnchorTipNumber(_style, @"borderRadius", 14), MIN(w, h) / 2);
-  CGFloat s = _arrowSize;
-  CGFloat a = _arrowOffset;
-  BOOL arrow = s > 0;
-  UIBezierPath *path = [UIBezierPath bezierPath];
-
-  [path moveToPoint:CGPointMake(r, 0)];
-  if (arrow && _placement == AnchorTipPlacementBottom) {
-    [path addLineToPoint:CGPointMake(a - s, 0)];
-    [path addLineToPoint:CGPointMake(a, -s)];
-    [path addLineToPoint:CGPointMake(a + s, 0)];
-  }
-  [path addLineToPoint:CGPointMake(w - r, 0)];
-  [path addArcWithCenter:CGPointMake(w - r, r) radius:r startAngle:-M_PI_2 endAngle:0 clockwise:YES];
-  if (arrow && _placement == AnchorTipPlacementLeft) {
-    [path addLineToPoint:CGPointMake(w, a - s)];
-    [path addLineToPoint:CGPointMake(w + s, a)];
-    [path addLineToPoint:CGPointMake(w, a + s)];
-  }
-  [path addLineToPoint:CGPointMake(w, h - r)];
-  [path addArcWithCenter:CGPointMake(w - r, h - r) radius:r startAngle:0 endAngle:M_PI_2 clockwise:YES];
-  if (arrow && _placement == AnchorTipPlacementTop) {
-    [path addLineToPoint:CGPointMake(a + s, h)];
-    [path addLineToPoint:CGPointMake(a, h + s)];
-    [path addLineToPoint:CGPointMake(a - s, h)];
-  }
-  [path addLineToPoint:CGPointMake(r, h)];
-  [path addArcWithCenter:CGPointMake(r, h - r) radius:r startAngle:M_PI_2 endAngle:M_PI clockwise:YES];
-  if (arrow && _placement == AnchorTipPlacementRight) {
-    [path addLineToPoint:CGPointMake(0, a + s)];
-    [path addLineToPoint:CGPointMake(-s, a)];
-    [path addLineToPoint:CGPointMake(0, a - s)];
-  }
-  [path addLineToPoint:CGPointMake(0, r)];
-  [path addArcWithCenter:CGPointMake(r, r) radius:r startAngle:M_PI endAngle:3 * M_PI_2 clockwise:YES];
-  [path closePath];
-  return path;
-}
-
-- (void)updateShape
-{
-  [CATransaction begin];
-  [CATransaction setDisableActions:YES];
-  CGPathRef path = [self bubblePath].CGPath;
-  _shape.frame = self.bounds;
-  _shape.path = path;
-  self.layer.shadowPath = path;
-  [CATransaction commit];
 }
 
 #pragma mark - Interaction
-
-- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch
-{
-  return ![touch.view isKindOfClass:[UIButton class]];
-}
 
 - (void)handleTap
 {
@@ -422,17 +391,125 @@ typedef struct {
   self.onEvent(@"action", @{ @"id" : actionId, @"dismissOnPress" : @(AnchorTipBool(action, @"dismissOnPress", YES)) });
 }
 
-#pragma mark - Accessibility
+#pragma mark - Animation
 
-- (NSArray *)accessibilityElements
+- (NSString *)animationPreset
 {
-  NSMutableArray *elements = [NSMutableArray new];
-  for (UIView *view in @[ _titleLabel, _messageLabel, _stepLabel ]) {
-    if (!view.hidden) [elements addObject:view];
+  return AnchorTipString(_config, @"animation") ?: @"scale";
+}
+
+/** Slightly shrunk and pulled toward the anchor. */
+- (CGAffineTransform)hiddenTransform
+{
+  if (![[self animationPreset] isEqualToString:@"scale"]) return CGAffineTransformIdentity;
+  CGFloat travel = 8;
+  CGFloat dx = 0;
+  CGFloat dy = 0;
+  switch (_side) {
+    case AnchorTipSideTop:
+      dy = travel;
+      break;
+    case AnchorTipSideBottom:
+      dy = -travel;
+      break;
+    case AnchorTipSideLeft:
+      dx = travel;
+      break;
+    case AnchorTipSideRight:
+      dx = -travel;
+      break;
   }
-  [elements addObjectsFromArray:_actionButtons];
-  if (!_closeButton.hidden) [elements addObject:_closeButton];
-  return elements;
+  return CGAffineTransformScale(CGAffineTransformMakeTranslation(dx, dy), 0.9, 0.9);
+}
+
+- (void)animateIn
+{
+  if ([[self animationPreset] isEqualToString:@"none"]) {
+    self.alpha = 1;
+    self.transform = CGAffineTransformIdentity;
+    return;
+  }
+  self.alpha = 0;
+  self.transform = [self hiddenTransform];
+  [UIView animateWithDuration:0.32
+                        delay:0
+       usingSpringWithDamping:0.85
+        initialSpringVelocity:0.3
+                      options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
+                   animations:^{
+                     self.alpha = 1;
+                     self.transform = CGAffineTransformIdentity;
+                   }
+                   completion:nil];
+}
+
+- (void)animateOutWithCompletion:(void (^)(void))completion
+{
+  if ([[self animationPreset] isEqualToString:@"none"]) {
+    completion();
+    return;
+  }
+  [UIView animateWithDuration:0.15
+      delay:0
+      options:UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionBeginFromCurrentState
+      animations:^{
+        self.alpha = 0;
+        self.transform = [self hiddenTransform];
+      }
+      completion:^(__unused BOOL finished) {
+        completion();
+      }];
+}
+
+@end
+
+@implementation AnchorTipBackdropView {
+  CAShapeLayer *_dim;
+  CGRect _hole;
+  CGFloat _radius;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+{
+  if (self = [super initWithFrame:frame]) {
+    self.backgroundColor = UIColor.clearColor;
+    _dim = [CAShapeLayer layer];
+    _dim.fillRule = kCAFillRuleEvenOdd;
+    [self.layer addSublayer:_dim];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap)];
+    [self addGestureRecognizer:tap];
+  }
+  return self;
+}
+
+- (void)setHole:(CGRect)hole radius:(CGFloat)radius color:(UIColor *)color
+{
+  _hole = hole;
+  _radius = radius;
+  _dim.fillColor = color.CGColor;
+  [self setNeedsLayout];
+}
+
+- (BOOL)holeContainsPoint:(CGPoint)point
+{
+  return CGRectContainsPoint(_hole, point);
+}
+
+- (void)layoutSubviews
+{
+  [super layoutSubviews];
+  UIBezierPath *path = [UIBezierPath bezierPathWithRect:self.bounds];
+  [path appendPath:[UIBezierPath bezierPathWithRoundedRect:_hole cornerRadius:_radius]];
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  _dim.frame = self.bounds;
+  _dim.path = path.CGPath;
+  [CATransaction commit];
+}
+
+- (void)handleTap
+{
+  if (self.onTap) self.onTap();
 }
 
 @end

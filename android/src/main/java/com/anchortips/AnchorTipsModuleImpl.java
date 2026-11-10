@@ -2,7 +2,8 @@ package com.anchortips;
 
 import android.app.Activity;
 import android.graphics.Rect;
-import android.util.TypedValue;
+import android.graphics.RectF;
+import android.util.DisplayMetrics;
 import android.view.View;
 
 import androidx.annotation.Nullable;
@@ -28,19 +29,12 @@ final class AnchorTipsModuleImpl implements LifecycleEventListener {
 
   AnchorTipsModuleImpl(ReactApplicationContext context) {
     this.context = context;
-    this.overlay = new AnchorTipsOverlay(
-        new AnchorTipsOverlay.EventSink() {
-          @Override
-          public void emit(String id, String kind, @Nullable String actionId, @Nullable String reason) {
-            emitEvent(id, kind, actionId, reason);
-          }
-        },
-        new AnchorTipsOverlay.AnchorResolver() {
-          @Override
-          public Rect resolve(Activity activity, AnchorTipConfig config) {
-            return anchorOnScreen(activity, config);
-          }
-        });
+    this.overlay = new AnchorTipsOverlay(new AnchorTipsOverlay.EventSink() {
+      @Override
+      public void emit(String id, String kind, @Nullable String actionId, @Nullable String reason) {
+        emitEvent(id, kind, actionId, reason);
+      }
+    });
     context.addLifecycleEventListener(this);
   }
 
@@ -49,7 +43,8 @@ final class AnchorTipsModuleImpl implements LifecycleEventListener {
     UiThreadUtil.runOnUiThread(new Runnable() {
       @Override
       public void run() {
-        overlay.show(context.getCurrentActivity(), id, parsed);
+        Activity activity = context.getCurrentActivity();
+        overlay.show(activity, id, parsed, anchorOnScreen(activity, parsed));
       }
     });
   }
@@ -59,7 +54,7 @@ final class AnchorTipsModuleImpl implements LifecycleEventListener {
     UiThreadUtil.runOnUiThread(new Runnable() {
       @Override
       public void run() {
-        overlay.update(context.getCurrentActivity(), id, parsed);
+        overlay.update(id, parsed, anchorOnScreen(context.getCurrentActivity(), parsed));
       }
     });
   }
@@ -95,33 +90,31 @@ final class AnchorTipsModuleImpl implements LifecycleEventListener {
   }
 
   /**
-   * The anchor view's frame on screen. The view is looked up by its tag so
-   * the frame matches what is drawn; the JavaScript measurement is the fallback.
+   * The anchor's frame on screen in pixels. The native view is exact; the
+   * JavaScript measurement is relative to the visible window frame and is
+   * the fallback when the view cannot be resolved.
    */
-  private Rect anchorOnScreen(Activity activity, AnchorTipConfig config) {
+  private RectF anchorOnScreen(@Nullable Activity activity, AnchorTipConfig config) {
     if (config.anchorTag != null) {
       try {
         UIManager manager = UIManagerHelper.getUIManagerForReactTag(context, config.anchorTag);
         View view = manager != null ? manager.resolveView(config.anchorTag) : null;
-        if (view != null && view.getWidth() > 0 && view.getHeight() > 0) {
+        if (view != null && view.getWidth() > 0 && view.isAttachedToWindow()) {
           int[] location = new int[2];
           view.getLocationOnScreen(location);
-          return new Rect(location[0], location[1], location[0] + view.getWidth(), location[1] + view.getHeight());
+          return new RectF(location[0], location[1], location[0] + view.getWidth(), location[1] + view.getHeight());
         }
       } catch (Throwable ignored) {
-        // Older releases cannot resolve views by tag; use the measured frame.
+        // Older releases or a view that is already gone: use the JavaScript frame.
       }
     }
-    // `measureInWindow` is relative to the window's visible frame.
+    DisplayMetrics metrics = context.getResources().getDisplayMetrics();
+    float density = metrics.density;
     Rect frame = new Rect();
-    activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(frame);
-    int left = frame.left + px(config.anchorX);
-    int top = frame.top + px(config.anchorY);
-    return new Rect(left, top, left + px(config.anchorWidth), top + px(config.anchorHeight));
-  }
-
-  private int px(float dp) {
-    return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, dp, context.getResources().getDisplayMetrics()));
+    if (activity != null) activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(frame);
+    float left = frame.left + config.anchorX * density;
+    float top = frame.top + config.anchorY * density;
+    return new RectF(left, top, left + config.anchorWidth * density, top + config.anchorHeight * density);
   }
 
   private void emitEvent(String id, String kind, @Nullable String actionId, @Nullable String reason) {

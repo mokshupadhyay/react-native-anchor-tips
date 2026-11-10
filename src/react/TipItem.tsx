@@ -2,6 +2,7 @@ import React from 'react';
 import {
   AccessibilityInfo,
   Animated,
+  BackHandler,
   Easing,
   type LayoutChangeEvent,
   Platform,
@@ -86,11 +87,25 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
   const [size, setSize] = React.useState<Size | null>(null);
   const mounted = React.useRef(true);
   const isVisible = record.phase === 'visible';
+  const [reduceMotion, setReduceMotion] = React.useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled?.()
+      .then((enabled) => active && setReduceMotion(enabled))
+      .catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener?.('reduceMotionChanged', setReduceMotion);
+    return () => {
+      active = false;
+      subscription?.remove?.();
+    };
+  }, []);
 
   const anchorRect = record.anchorRect;
   const anchor: Rect | null = anchorRect
     ? { ...anchorRect, x: anchorRect.x - hostOrigin.x, y: anchorRect.y - hostOrigin.y }
     : null;
+  const noMotion = reduceMotion || options.animation === 'none';
   const arrowSize = options.showArrow ? layout.arrowSize : 0;
   const placement =
     anchor && size
@@ -124,7 +139,7 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
 
   React.useEffect(() => {
     if (!isVisible || !ready) return;
-    if (options.animation === 'none') progress.setValue(1);
+    if (noMotion) progress.setValue(1);
     else Animated.timing(progress, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
     const label = accessibilityLabelFor(options);
     if (label && Platform.OS === 'ios' && AccessibilityInfo.announceForAccessibility) {
@@ -140,16 +155,27 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
       // A host switch unmounts the item mid-exit; the new host finishes it.
       if (mounted.current) store.remove(record.key);
     };
-    if (options.animation === 'none' || !ready) finish();
+    if (noMotion || !ready) finish();
     else Animated.timing(progress, { toValue: 0, duration: 150, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(finish);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.phase]);
 
+  // Android back button closes a tip that closes on an outside press.
+  const closeOnBack = isVisible && options.dismissOnOutsidePress && record.presentation === 'react';
   React.useEffect(() => {
-    if (!isVisible || !ready || options.duration <= 0) return undefined;
+    if (!closeOnBack || Platform.OS !== 'android') return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      store.dismiss(record.id, 'outside-press');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [closeOnBack, record.id, store]);
+
+  React.useEffect(() => {
+    if (!isVisible || options.duration <= 0) return undefined;
     const timeout = setTimeout(() => store.dismiss(record.id, 'timeout'), options.duration);
     return () => clearTimeout(timeout);
-  }, [isVisible, ready, options.duration, record.revision, record.id, store]);
+  }, [isVisible, options.duration, record.revision, record.id, store]);
 
   const dismiss = React.useCallback(
     (reason?: TipDismissReason) => store.dismiss(record.id, reason),
@@ -182,7 +208,7 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
     Math.min(layout.maxWidth, viewport.width - insets.left - insets.right - 2 * layout.margin),
   );
   const shift = placement ? travel(placement.placement) : { x: 0, y: 0 };
-  const scale = options.animation === 'scale';
+  const scale = !noMotion && options.animation === 'scale';
   const animatedStyle = {
     opacity: progress,
     transform: scale

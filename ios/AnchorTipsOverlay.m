@@ -1,11 +1,33 @@
 #import "AnchorTipsOverlay.h"
 
-#import "AnchorTipGeometry.h"
+#import <React/RCTConvert.h>
+
 #import "AnchorTipView.h"
 
-static const CGFloat AnchorTipTravel = 8;
+static CGFloat AnchorTipsNumber(NSDictionary *dict, NSString *key, CGFloat fallback)
+{
+  id value = dict[key];
+  return [value isKindOfClass:[NSNumber class]] ? [value doubleValue] : fallback;
+}
 
-static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
+static BOOL AnchorTipsBool(NSDictionary *dict, NSString *key, BOOL fallback)
+{
+  id value = dict[key];
+  return [value isKindOfClass:[NSNumber class]] ? [value boolValue] : fallback;
+}
+
+static NSString *AnchorTipsString(NSDictionary *dict, NSString *key, NSString *fallback)
+{
+  id value = dict[key];
+  return [value isKindOfClass:[NSString class]] && [value length] > 0 ? value : fallback;
+}
+
+static NSDictionary *AnchorTipsStyle(NSDictionary *config)
+{
+  return [config[@"style"] isKindOfClass:[NSDictionary class]] ? config[@"style"] : @{};
+}
+
+static UIWindow *_Nullable AnchorTipsHostKeyWindow(UIWindow *_Nullable excluded)
 {
   if (@available(iOS 13.0, *)) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
@@ -25,13 +47,14 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
 
 /** Forwards status bar and rotation preferences to the app's visible controller. */
 @interface AnchorTipsRootViewController : UIViewController
+@property (nonatomic, copy, nullable) void (^onLayout)(void);
 @end
 
 @implementation AnchorTipsRootViewController
 
 - (UIViewController *)hostViewController
 {
-  UIViewController *controller = AnchorTipsHostWindow(self.view.window).rootViewController;
+  UIViewController *controller = AnchorTipsHostKeyWindow(self.view.window).rootViewController;
   while (controller.presentedViewController != nil && !controller.presentedViewController.isBeingDismissed) {
     controller = controller.presentedViewController;
   }
@@ -56,70 +79,20 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   return host ? host.supportedInterfaceOrientations : UIInterfaceOrientationMaskAll;
 }
 
-@end
-
-/** Dims the screen except a rounded hole around the anchor. Touches in the hole reach the app. */
-@interface AnchorTipsBackdropView : UIView
-@property (nonatomic, assign) CGRect hole;
-@property (nonatomic, assign) CGFloat holeRadius;
-@property (nonatomic, strong) UIColor *dimColor;
-@property (nonatomic, copy, nullable) void (^onPress)(void);
-@end
-
-@implementation AnchorTipsBackdropView {
-  CAShapeLayer *_shape;
-}
-
-- (instancetype)initWithFrame:(CGRect)frame
+- (void)viewDidLayoutSubviews
 {
-  if (self = [super initWithFrame:frame]) {
-    _shape = [CAShapeLayer layer];
-    _shape.fillRule = kCAFillRuleEvenOdd;
-    [self.layer addSublayer:_shape];
-    _dimColor = [UIColor colorWithWhite:0 alpha:0.5];
-    self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(handleTap)]];
-  }
-  return self;
-}
-
-- (void)handleTap
-{
-  if (self.onPress) self.onPress();
-}
-
-- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
-{
-  return [super pointInside:point withEvent:event] && !CGRectContainsPoint(self.hole, point);
-}
-
-- (void)layoutSubviews
-{
-  [super layoutSubviews];
-  [self updateShape];
-}
-
-- (void)updateShape
-{
-  [CATransaction begin];
-  [CATransaction setDisableActions:YES];
-  UIBezierPath *path = [UIBezierPath bezierPathWithRect:self.bounds];
-  if (!CGRectIsEmpty(self.hole)) {
-    [path appendPath:[UIBezierPath bezierPathWithRoundedRect:self.hole cornerRadius:self.holeRadius]];
-  }
-  _shape.frame = self.bounds;
-  _shape.path = path.CGPath;
-  _shape.fillColor = self.dimColor.CGColor;
-  [CATransaction commit];
+  [super viewDidLayoutSubviews];
+  if (self.onLayout) self.onLayout();
 }
 
 @end
 
-@class AnchorTipsOverlay;
-
-/** Only tips and backdrops receive touches; every other touch reaches the app below. */
+/**
+ * Tips and backdrops receive touches; everything else, including the
+ * spotlight cutout, reaches the app below.
+ */
 @interface AnchorTipsWindow : UIWindow
-@property (nonatomic, copy, nullable) void (^onOutsideTouch)(UIEvent *event);
+@property (nonatomic, copy, nullable) void (^onOutsideTouch)(UIEvent *_Nullable event);
 @end
 
 @implementation AnchorTipsWindow
@@ -128,9 +101,13 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
 {
   UIView *hit = [super hitTest:point withEvent:event];
   for (UIView *view = hit; view != nil; view = view.superview) {
-    if ([view isKindOfClass:[AnchorTipView class]] || [view isKindOfClass:[AnchorTipsBackdropView class]]) return hit;
+    if ([view isKindOfClass:[AnchorTipView class]]) return hit;
+    if ([view isKindOfClass:[AnchorTipBackdropView class]]) {
+      AnchorTipBackdropView *backdrop = (AnchorTipBackdropView *)view;
+      return [backdrop holeContainsPoint:[self convertPoint:point toView:backdrop]] ? nil : hit;
+    }
   }
-  if (event != nil && event.type == UIEventTypeTouches && self.onOutsideTouch) self.onOutsideTouch(event);
+  if (self.onOutsideTouch) self.onOutsideTouch(event);
   return nil;
 }
 
@@ -139,7 +116,7 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
 @implementation AnchorTipsOverlay {
   AnchorTipsWindow *_window;
   NSMutableDictionary<NSString *, AnchorTipView *> *_tips;
-  NSMutableDictionary<NSString *, AnchorTipsBackdropView *> *_backdrops;
+  NSMutableDictionary<NSString *, AnchorTipBackdropView *> *_backdrops;
   NSMutableDictionary<NSString *, NSNumber *> *_timers;
   NSTimeInterval _lastOutsideTouch;
 }
@@ -165,6 +142,8 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   [self ensureWindow];
   UIView *root = _window.rootViewController.view;
 
+  [self syncBackdrop:tipId config:config animated:YES];
+
   AnchorTipView *view = [[AnchorTipView alloc] initWithTipId:tipId config:config];
   __weak AnchorTipsOverlay *weakSelf = self;
   __weak AnchorTipView *weakView = view;
@@ -172,24 +151,16 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
     AnchorTipView *strongView = weakView;
     if (strongView != nil) [weakSelf handleEvent:kind payload:payload view:strongView];
   };
-
-  if (AnchorTipBool(config, @"spotlight", NO)) {
-    AnchorTipsBackdropView *backdrop = [[AnchorTipsBackdropView alloc] initWithFrame:root.bounds];
-    backdrop.onPress = ^{
-      [weakSelf handleBackdropPress:tipId];
-    };
-    [root addSubview:backdrop];
-    _backdrops[tipId] = backdrop;
-  }
-  [root addSubview:view];
   _tips[tipId] = view;
-
-  [self layoutTip:view];
-  [self animateIn:view];
+  [root addSubview:view];
+  [self layoutTip:tipId];
+  [view animateIn];
   [self restartTimer:tipId];
 
-  NSString *label = AnchorTipString(config, @"accessibilityLabel");
-  if (label.length > 0) UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, label);
+  NSString *label = AnchorTipsString(config, @"accessibilityLabel", @"");
+  if (label.length > 0) {
+    UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, label);
+  }
 }
 
 - (void)update:(NSString *)tipId config:(NSDictionary *)config
@@ -197,14 +168,11 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   AnchorTipView *view = _tips[tipId];
   if (view == nil || view.dismissing) return;
   [view applyConfig:config];
+  [self syncBackdrop:tipId config:config animated:YES];
   [UIView animateWithDuration:0.2
-                        delay:0
-                      options:UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionAllowUserInteraction
                    animations:^{
-                     [self layoutTip:view];
-                     [view layoutIfNeeded];
-                   }
-                   completion:nil];
+                     [self layoutTip:tipId];
+                   }];
   [self restartTimer:tipId];
 }
 
@@ -219,137 +187,112 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   if (view.dismissing) return;
   view.dismissing = YES;
   [_timers removeObjectForKey:tipId];
-  AnchorTipsBackdropView *backdrop = _backdrops[tipId];
-  void (^finish)(void) = ^{
-    [self removeTip:tipId reason:reason];
-  };
-  if ([[self animationFor:view] isEqualToString:@"none"]) {
-    finish();
-    return;
-  }
+  AnchorTipBackdropView *backdrop = _backdrops[tipId];
   [UIView animateWithDuration:0.15
-      delay:0
-      options:UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionBeginFromCurrentState
-      animations:^{
-        view.alpha = 0;
-        view.transform = [self hiddenTransformFor:view];
-        backdrop.alpha = 0;
-      }
-      completion:^(__unused BOOL finished) {
-        finish();
-      }];
+                   animations:^{
+                     backdrop.alpha = 0;
+                   }];
+  [view animateOutWithCompletion:^{
+    [self removeTip:view reason:reason];
+  }];
 }
 
 - (void)dismissAll
 {
-  for (NSString *tipId in _tips.allKeys) [self dismiss:tipId reason:@"dismissed"];
+  for (NSString *tipId in _tips.allKeys) {
+    [self dismiss:tipId reason:@"dismissed"];
+  }
 }
 
 #pragma mark - Layout
 
-- (void)layoutTip:(AnchorTipView *)view
+- (void)layoutTip:(NSString *)tipId
 {
-  UIView *root = _window.rootViewController.view;
+  AnchorTipView *view = _tips[tipId];
+  if (view == nil) return;
   NSDictionary *config = view.config;
-  NSDictionary *style = AnchorTipStyle(config);
-  CGRect bounds = root.bounds;
+  NSDictionary *style = AnchorTipsStyle(config);
+  UIView *root = _window.rootViewController.view;
+  CGSize viewport = root.bounds.size;
   UIEdgeInsets insets = UIEdgeInsetsZero;
   if (@available(iOS 11.0, *)) insets = root.safeAreaInsets;
 
-  CGFloat margin = AnchorTipNumber(style, @"margin", 12);
-  CGFloat maxWidth = MIN(AnchorTipNumber(style, @"maxWidth", 320), bounds.size.width - insets.left - insets.right - 2 * margin);
+  CGFloat margin = AnchorTipsNumber(style, @"margin", 12);
+  CGFloat maxWidth = MIN(AnchorTipsNumber(style, @"maxWidth", 320), viewport.width - insets.left - insets.right - 2 * margin);
   CGSize size = [view fittingSizeForMaxWidth:MAX(0, maxWidth)];
+  CGRect anchor = [self anchorRectForConfig:config inView:root];
+  BOOL showArrow = AnchorTipsBool(config, @"showArrow", YES);
 
-  NSDictionary *rect = [config[@"anchor"] isKindOfClass:[NSDictionary class]] ? config[@"anchor"] : @{};
-  CGRect anchor = CGRectMake(AnchorTipNumber(rect, @"x", 0), AnchorTipNumber(rect, @"y", 0),
-                             AnchorTipNumber(rect, @"width", 0), AnchorTipNumber(rect, @"height", 0));
-  // JavaScript measures in the app window; convert in case the windows differ.
-  UIWindow *host = AnchorTipsHostWindow(_window);
-  if (host != nil) anchor = [root convertRect:anchor fromView:host];
+  AnchorTipPlacement placement = AnchorTipComputePlacement(
+      anchor,
+      size,
+      viewport,
+      insets,
+      AnchorTipsString(config, @"placement", @"auto"),
+      AnchorTipsString(config, @"align", @"center"),
+      AnchorTipsNumber(style, @"offset", 4),
+      showArrow ? AnchorTipsNumber(style, @"arrowSize", 8) : 0,
+      margin,
+      AnchorTipsNumber(style, @"borderRadius", 14));
+  [view applyPlacement:placement size:size];
 
-  CGFloat arrowSize = AnchorTipBool(config, @"showArrow", YES) ? AnchorTipNumber(style, @"arrowSize", 8) : 0;
-  AnchorTipLayout layout = AnchorTipComputeLayout(
-      anchor, size, bounds.size, insets, AnchorTipString(config, @"placement"), AnchorTipString(config, @"align"),
-      AnchorTipNumber(style, @"offset", 4), arrowSize, margin, AnchorTipNumber(style, @"borderRadius", 14));
-
-  // Set bounds and center so an in-flight transform is not baked into the frame.
-  view.bounds = CGRectMake(0, 0, layout.frame.size.width, layout.frame.size.height);
-  view.center = CGPointMake(CGRectGetMidX(layout.frame), CGRectGetMidY(layout.frame));
-  [view setPlacement:layout.placement arrowOffset:layout.arrowOffset arrowSize:arrowSize];
-  [view setNeedsLayout];
-
-  AnchorTipsBackdropView *backdrop = _backdrops[view.tipId];
+  AnchorTipBackdropView *backdrop = _backdrops[tipId];
   if (backdrop != nil) {
-    CGFloat padding = AnchorTipNumber(style, @"spotlightPadding", 6);
-    backdrop.hole = CGRectInset(anchor, -padding, -padding);
-    backdrop.holeRadius = AnchorTipNumber(style, @"spotlightRadius", 12);
-    backdrop.dimColor = AnchorTipColor(style, @"backdropColor", [UIColor colorWithWhite:0 alpha:0.5]);
-    [backdrop updateShape];
+    CGFloat padding = AnchorTipsNumber(style, @"spotlightPadding", 6);
+    id rawColor = style[@"backdropColor"];
+    UIColor *color = rawColor != nil && rawColor != [NSNull null] ? [RCTConvert UIColor:rawColor] : nil;
+    [backdrop setHole:CGRectInset(anchor, -padding, -padding)
+               radius:AnchorTipsNumber(style, @"spotlightRadius", 12)
+                color:color ?: [UIColor colorWithWhite:0 alpha:0.55]];
   }
 }
 
-#pragma mark - Animation
-
-- (NSString *)animationFor:(AnchorTipView *)view
+/** Anchors are measured in the app window; convert them into the overlay. */
+- (CGRect)anchorRectForConfig:(NSDictionary *)config inView:(UIView *)root
 {
-  return AnchorTipString(view.config, @"animation") ?: @"scale";
+  NSDictionary *anchor = [config[@"anchor"] isKindOfClass:[NSDictionary class]] ? config[@"anchor"] : @{};
+  CGRect rect = CGRectMake(
+      AnchorTipsNumber(anchor, @"x", 0),
+      AnchorTipsNumber(anchor, @"y", 0),
+      AnchorTipsNumber(anchor, @"width", 0),
+      AnchorTipsNumber(anchor, @"height", 0));
+  UIWindow *host = AnchorTipsHostKeyWindow(_window);
+  return host != nil ? [root convertRect:rect fromView:host] : rect;
 }
 
-- (CGAffineTransform)hiddenTransformFor:(AnchorTipView *)view
+- (void)syncBackdrop:(NSString *)tipId config:(NSDictionary *)config animated:(BOOL)animated
 {
-  if (![[self animationFor:view] isEqualToString:@"scale"]) return CGAffineTransformIdentity;
-  CGFloat dx = 0;
-  CGFloat dy = 0;
-  switch (view.placement) {
-    case AnchorTipPlacementTop:
-      dy = AnchorTipTravel;
-      break;
-    case AnchorTipPlacementBottom:
-      dy = -AnchorTipTravel;
-      break;
-    case AnchorTipPlacementLeft:
-      dx = AnchorTipTravel;
-      break;
-    case AnchorTipPlacementRight:
-      dx = -AnchorTipTravel;
-      break;
+  BOOL wanted = AnchorTipsBool(config, @"spotlight", NO);
+  AnchorTipBackdropView *backdrop = _backdrops[tipId];
+  if (!wanted) {
+    if (backdrop != nil) {
+      [_backdrops removeObjectForKey:tipId];
+      [backdrop removeFromSuperview];
+    }
+    return;
   }
-  return CGAffineTransformScale(CGAffineTransformMakeTranslation(dx, dy), 0.9, 0.9);
-}
-
-- (void)animateIn:(AnchorTipView *)view
-{
-  AnchorTipsBackdropView *backdrop = _backdrops[view.tipId];
-  if ([[self animationFor:view] isEqualToString:@"none"]) return;
-  view.alpha = 0;
-  view.transform = [self hiddenTransformFor:view];
-  backdrop.alpha = 0;
-  [UIView animateWithDuration:0.22
-                        delay:0
-                      options:UIViewAnimationOptionCurveEaseOut | UIViewAnimationOptionAllowUserInteraction
-                   animations:^{
-                     view.alpha = 1;
-                     view.transform = CGAffineTransformIdentity;
-                     backdrop.alpha = 1;
-                   }
-                   completion:nil];
-}
-
-#pragma mark - Timer
-
-- (void)restartTimer:(NSString *)tipId
-{
-  AnchorTipView *view = _tips[tipId];
-  NSTimeInterval duration = AnchorTipNumber(view.config, @"duration", 0) / 1000.0;
-  NSUInteger generation = _timers[tipId].unsignedIntegerValue + 1;
-  _timers[tipId] = @(generation);
-  if (duration <= 0) return;
+  if (backdrop != nil) return;
+  UIView *root = _window.rootViewController.view;
+  backdrop = [[AnchorTipBackdropView alloc] initWithFrame:root.bounds];
+  backdrop.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   __weak AnchorTipsOverlay *weakSelf = self;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    AnchorTipsOverlay *strongSelf = weakSelf;
-    if (strongSelf == nil || strongSelf->_timers[tipId].unsignedIntegerValue != generation) return;
-    [strongSelf dismiss:tipId reason:@"timeout"];
-  });
+  backdrop.onTap = ^{
+    [weakSelf handleBackdropTap:tipId];
+  };
+  _backdrops[tipId] = backdrop;
+  AnchorTipView *view = _tips[tipId];
+  if (view != nil) {
+    [root insertSubview:backdrop belowSubview:view];
+  } else {
+    [root addSubview:backdrop];
+  }
+  if (animated) {
+    backdrop.alpha = 0;
+    [UIView animateWithDuration:0.2
+                     animations:^{
+                       backdrop.alpha = 1;
+                     }];
+  }
 }
 
 #pragma mark - Events
@@ -359,7 +302,7 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   NSString *tipId = view.tipId;
   if ([kind isEqualToString:@"press"]) {
     [self emit:@{ @"id" : tipId, @"kind" : @"press" }];
-    if (AnchorTipBool(view.config, @"dismissOnTipPress", NO)) [self dismiss:tipId reason:@"tip-press"];
+    if (AnchorTipsBool(view.config, @"dismissOnTipPress", NO)) [self dismiss:tipId reason:@"tip-press"];
   } else if ([kind isEqualToString:@"action"]) {
     [self emit:@{ @"id" : tipId, @"kind" : @"action", @"actionId" : payload[@"id"] ?: @"" }];
     if ([payload[@"dismissOnPress"] boolValue]) [self dismiss:tipId reason:@"action"];
@@ -368,34 +311,49 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   }
 }
 
-- (void)handleBackdropPress:(NSString *)tipId
+- (void)handleBackdropTap:(NSString *)tipId
 {
   AnchorTipView *view = _tips[tipId];
-  if (view != nil && AnchorTipBool(view.config, @"dismissOnBackdropPress", YES)) {
-    [self dismiss:tipId reason:@"backdrop-press"];
-  }
+  if (view == nil || view.dismissing) return;
+  if (AnchorTipsBool(view.config, @"dismissOnBackdropPress", YES)) [self dismiss:tipId reason:@"backdrop-press"];
 }
 
 - (void)handleOutsideTouch:(UIEvent *)event
 {
-  // Hit testing runs more than once per touch.
-  if (event.timestamp == _lastOutsideTouch) return;
-  _lastOutsideTouch = event.timestamp;
-  NSMutableArray<NSString *> *targets = [NSMutableArray new];
-  for (NSString *tipId in _tips) {
-    AnchorTipView *view = _tips[tipId];
-    if (!view.dismissing && AnchorTipBool(view.config, @"dismissOnOutsidePress", YES)) [targets addObject:tipId];
-  }
-  if (targets.count == 0) return;
-  // Leave hit testing before changing the view hierarchy.
+  // Hit testing runs several times per touch; react once.
+  NSTimeInterval timestamp = event != nil ? event.timestamp : CACurrentMediaTime();
+  if (timestamp == _lastOutsideTouch) return;
+  _lastOutsideTouch = timestamp;
   dispatch_async(dispatch_get_main_queue(), ^{
-    for (NSString *tipId in targets) [self dismiss:tipId reason:@"outside-press"];
+    for (NSString *tipId in self->_tips.allKeys) {
+      AnchorTipView *view = self->_tips[tipId];
+      if (!view.dismissing && AnchorTipsBool(view.config, @"dismissOnOutsidePress", YES)) {
+        [self dismiss:tipId reason:@"outside-press"];
+      }
+    }
   });
 }
 
 - (void)emit:(NSDictionary *)event
 {
   if (self.eventSink) self.eventSink(event);
+}
+
+#pragma mark - Timer
+
+- (void)restartTimer:(NSString *)tipId
+{
+  AnchorTipView *view = _tips[tipId];
+  NSTimeInterval duration = AnchorTipsNumber(view.config, @"duration", 0) / 1000.0;
+  NSUInteger generation = _timers[tipId].unsignedIntegerValue + 1;
+  _timers[tipId] = @(generation);
+  if (duration <= 0) return;
+  __weak AnchorTipsOverlay *weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    AnchorTipsOverlay *strongSelf = weakSelf;
+    if (strongSelf == nil || strongSelf->_timers[tipId].unsignedIntegerValue != generation) return;
+    [strongSelf dismiss:tipId reason:@"timeout"];
+  });
 }
 
 #pragma mark - Window
@@ -412,7 +370,9 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
     UIWindowScene *scene = [self activeScene];
     if (scene != nil) window = [[AnchorTipsWindow alloc] initWithWindowScene:scene];
   }
-  if (window == nil) window = [[AnchorTipsWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  if (window == nil) {
+    window = [[AnchorTipsWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+  }
   window.windowLevel = UIWindowLevelAlert + 1;
   window.backgroundColor = UIColor.clearColor;
   __weak AnchorTipsOverlay *weakSelf = self;
@@ -422,9 +382,19 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
 
   AnchorTipsRootViewController *root = [AnchorTipsRootViewController new];
   root.view.backgroundColor = UIColor.clearColor;
+  root.onLayout = ^{
+    [weakSelf relayoutAll];
+  };
   window.rootViewController = root;
   window.hidden = NO;
   _window = window;
+}
+
+- (void)relayoutAll
+{
+  for (NSString *tipId in _tips.allKeys) {
+    if (!_tips[tipId].dismissing) [self layoutTip:tipId];
+  }
 }
 
 - (nullable UIWindowScene *)activeScene API_AVAILABLE(ios(13.0))
@@ -438,16 +408,18 @@ static UIWindow *_Nullable AnchorTipsHostWindow(UIWindow *_Nullable excluded)
   return fallback;
 }
 
-- (void)removeTip:(NSString *)tipId reason:(NSString *)reason
+- (void)removeTip:(AnchorTipView *)view reason:(NSString *)reason
 {
-  AnchorTipView *view = _tips[tipId];
-  if (view == nil) return;
-  [_tips removeObjectForKey:tipId];
-  [_timers removeObjectForKey:tipId];
+  if (_tips[view.tipId] != view) return;
+  [_tips removeObjectForKey:view.tipId];
+  [_timers removeObjectForKey:view.tipId];
   [view removeFromSuperview];
-  [_backdrops[tipId] removeFromSuperview];
-  [_backdrops removeObjectForKey:tipId];
-  [self emit:@{ @"id" : tipId, @"kind" : @"hide", @"reason" : reason }];
+  AnchorTipBackdropView *backdrop = _backdrops[view.tipId];
+  if (backdrop != nil) {
+    [_backdrops removeObjectForKey:view.tipId];
+    [backdrop removeFromSuperview];
+  }
+  [self emit:@{ @"id" : view.tipId, @"kind" : @"hide", @"reason" : reason }];
 
   if (_tips.count == 0) {
     _window.hidden = YES;

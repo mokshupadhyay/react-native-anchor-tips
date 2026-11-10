@@ -6,72 +6,61 @@ static CGFloat AnchorTipClamp(CGFloat value, CGFloat min, CGFloat max)
   return MIN(MAX(value, min), max);
 }
 
-BOOL AnchorTipPlacementIsVertical(AnchorTipPlacement placement)
+static BOOL AnchorTipIsVertical(AnchorTipSide side)
 {
-  return placement == AnchorTipPlacementTop || placement == AnchorTipPlacementBottom;
+  return side == AnchorTipSideTop || side == AnchorTipSideBottom;
 }
 
-static NSArray<NSNumber *> *AnchorTipOrder(NSString *_Nullable preference)
+static NSArray<NSNumber *> *AnchorTipOrder(NSString *preference)
 {
   if ([preference isEqualToString:@"top"]) {
-    return @[ @(AnchorTipPlacementTop), @(AnchorTipPlacementBottom), @(AnchorTipPlacementRight), @(AnchorTipPlacementLeft) ];
+    return @[ @(AnchorTipSideTop), @(AnchorTipSideBottom), @(AnchorTipSideRight), @(AnchorTipSideLeft) ];
   }
   if ([preference isEqualToString:@"right"]) {
-    return @[ @(AnchorTipPlacementRight), @(AnchorTipPlacementLeft), @(AnchorTipPlacementBottom), @(AnchorTipPlacementTop) ];
+    return @[ @(AnchorTipSideRight), @(AnchorTipSideLeft), @(AnchorTipSideBottom), @(AnchorTipSideTop) ];
   }
   if ([preference isEqualToString:@"left"]) {
-    return @[ @(AnchorTipPlacementLeft), @(AnchorTipPlacementRight), @(AnchorTipPlacementBottom), @(AnchorTipPlacementTop) ];
+    return @[ @(AnchorTipSideLeft), @(AnchorTipSideRight), @(AnchorTipSideBottom), @(AnchorTipSideTop) ];
   }
-  return @[ @(AnchorTipPlacementBottom), @(AnchorTipPlacementTop), @(AnchorTipPlacementRight), @(AnchorTipPlacementLeft) ];
+  return @[ @(AnchorTipSideBottom), @(AnchorTipSideTop), @(AnchorTipSideRight), @(AnchorTipSideLeft) ];
 }
 
-static CGFloat AnchorTipCrossStart(CGFloat anchorStart, CGFloat anchorLength, CGFloat length, NSString *_Nullable align)
+static CGFloat AnchorTipCrossStart(CGFloat anchorStart, CGFloat anchorLength, CGFloat length, NSString *align)
 {
   if ([align isEqualToString:@"start"]) return anchorStart;
   if ([align isEqualToString:@"end"]) return anchorStart + anchorLength - length;
   return anchorStart + anchorLength / 2 - length / 2;
 }
 
-AnchorTipLayout AnchorTipComputeLayout(
+AnchorTipPlacement AnchorTipComputePlacement(
     CGRect anchor,
     CGSize bubble,
     CGSize viewport,
     UIEdgeInsets insets,
-    NSString *_Nullable preference,
-    NSString *_Nullable align,
+    NSString *preference,
+    NSString *align,
     CGFloat offset,
     CGFloat arrowSize,
     CGFloat margin,
     CGFloat borderRadius)
 {
-  CGFloat spaceTop = CGRectGetMinY(anchor) - insets.top - margin;
-  CGFloat spaceBottom = viewport.height - insets.bottom - margin - CGRectGetMaxY(anchor);
-  CGFloat spaceLeft = CGRectGetMinX(anchor) - insets.left - margin;
-  CGFloat spaceRight = viewport.width - insets.right - margin - CGRectGetMaxX(anchor);
   CGFloat reach = offset + arrowSize;
+  CGFloat space[4];
+  space[AnchorTipSideTop] = CGRectGetMinY(anchor) - insets.top - margin;
+  space[AnchorTipSideBottom] = viewport.height - insets.bottom - margin - CGRectGetMaxY(anchor);
+  space[AnchorTipSideLeft] = CGRectGetMinX(anchor) - insets.left - margin;
+  space[AnchorTipSideRight] = viewport.width - insets.right - margin - CGRectGetMaxX(anchor);
   CGFloat usableWidth = viewport.width - insets.left - insets.right - 2 * margin;
   CGFloat usableHeight = viewport.height - insets.top - insets.bottom - 2 * margin;
 
-  AnchorTipPlacement placement = spaceTop > spaceBottom ? AnchorTipPlacementTop : AnchorTipPlacementBottom;
+  AnchorTipSide side = space[AnchorTipSideTop] > space[AnchorTipSideBottom] ? AnchorTipSideTop : AnchorTipSideBottom;
   for (NSNumber *candidate in AnchorTipOrder(preference)) {
-    AnchorTipPlacement side = (AnchorTipPlacement)candidate.integerValue;
-    BOOL fits;
-    switch (side) {
-      case AnchorTipPlacementTop:
-        fits = spaceTop >= bubble.height + reach && bubble.width <= usableWidth;
-        break;
-      case AnchorTipPlacementBottom:
-        fits = spaceBottom >= bubble.height + reach && bubble.width <= usableWidth;
-        break;
-      case AnchorTipPlacementLeft:
-        fits = spaceLeft >= bubble.width + reach && bubble.height <= usableHeight;
-        break;
-      case AnchorTipPlacementRight:
-        fits = spaceRight >= bubble.width + reach && bubble.height <= usableHeight;
-        break;
-    }
+    AnchorTipSide value = (AnchorTipSide)candidate.integerValue;
+    BOOL fits = AnchorTipIsVertical(value)
+        ? space[value] >= bubble.height + reach && bubble.width <= usableWidth
+        : space[value] >= bubble.width + reach && bubble.height <= usableHeight;
     if (fits) {
-      placement = side;
+      side = value;
       break;
     }
   }
@@ -82,24 +71,24 @@ AnchorTipLayout AnchorTipComputeLayout(
   CGFloat maxY = viewport.height - insets.bottom - margin - bubble.height;
   CGFloat x;
   CGFloat y;
-  if (AnchorTipPlacementIsVertical(placement)) {
-    x = AnchorTipClamp(AnchorTipCrossStart(CGRectGetMinX(anchor), CGRectGetWidth(anchor), bubble.width, align), minX, maxX);
-    y = placement == AnchorTipPlacementBottom ? CGRectGetMaxY(anchor) + reach : CGRectGetMinY(anchor) - reach - bubble.height;
+  if (AnchorTipIsVertical(side)) {
+    x = AnchorTipClamp(AnchorTipCrossStart(CGRectGetMinX(anchor), anchor.size.width, bubble.width, align), minX, maxX);
+    y = side == AnchorTipSideBottom ? CGRectGetMaxY(anchor) + reach : CGRectGetMinY(anchor) - reach - bubble.height;
     y = AnchorTipClamp(y, minY, maxY);
   } else {
-    y = AnchorTipClamp(AnchorTipCrossStart(CGRectGetMinY(anchor), CGRectGetHeight(anchor), bubble.height, align), minY, maxY);
-    x = placement == AnchorTipPlacementRight ? CGRectGetMaxX(anchor) + reach : CGRectGetMinX(anchor) - reach - bubble.width;
+    y = AnchorTipClamp(AnchorTipCrossStart(CGRectGetMinY(anchor), anchor.size.height, bubble.height, align), minY, maxY);
+    x = side == AnchorTipSideRight ? CGRectGetMaxX(anchor) + reach : CGRectGetMinX(anchor) - reach - bubble.width;
     x = AnchorTipClamp(x, minX, maxX);
   }
 
-  BOOL vertical = AnchorTipPlacementIsVertical(placement);
-  CGFloat length = vertical ? bubble.width : bubble.height;
-  CGFloat center = vertical ? CGRectGetMidX(anchor) - x : CGRectGetMidY(anchor) - y;
+  CGFloat length = AnchorTipIsVertical(side) ? bubble.width : bubble.height;
+  CGFloat center = AnchorTipIsVertical(side) ? CGRectGetMidX(anchor) - x : CGRectGetMidY(anchor) - y;
   CGFloat edge = MIN(length / 2, borderRadius + arrowSize);
 
-  AnchorTipLayout layout;
-  layout.placement = placement;
-  layout.frame = CGRectMake(x, y, bubble.width, bubble.height);
-  layout.arrowOffset = AnchorTipClamp(center, edge, length - edge);
-  return layout;
+  AnchorTipPlacement placement;
+  placement.side = side;
+  placement.x = x;
+  placement.y = y;
+  placement.arrowOffset = AnchorTipClamp(center, edge, length - edge);
+  return placement;
 }

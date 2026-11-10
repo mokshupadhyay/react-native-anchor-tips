@@ -1,32 +1,50 @@
 package com.anchortips;
 
-import android.graphics.Rect;
+import android.graphics.RectF;
 
-/** Port of `computePlacement` in src/core/geometry.ts; keep the two in sync. All values in px. */
+/** Port of `computePlacement` in `src/core/geometry.ts`; keep the two in sync. All values in pixels. */
 final class AnchorTipGeometry {
   static final int TOP = 0;
   static final int BOTTOM = 1;
   static final int LEFT = 2;
   static final int RIGHT = 3;
 
-  static final class Layout {
-    int placement;
-    /** Top-left corner of the bubble body. */
+  static final class Result {
+    int side;
+    /** Top-left corner of the bubble body, relative to the viewport. */
     float x;
     float y;
-    /** Arrow center along the edge facing the anchor, from the body's left (top/bottom) or top (left/right). */
+    /** Arrow center along the edge facing the anchor. */
     float arrowOffset;
+  }
+
+  static final class Input {
+    RectF anchor;
+    float bubbleWidth;
+    float bubbleHeight;
+    float viewportWidth;
+    float viewportHeight;
+    float insetTop;
+    float insetBottom;
+    float insetLeft;
+    float insetRight;
+    String preference = "auto";
+    String align = "center";
+    float offset;
+    float arrowSize;
+    float margin;
+    float borderRadius;
   }
 
   private AnchorTipGeometry() {}
 
-  static boolean isVertical(int placement) {
-    return placement == TOP || placement == BOTTOM;
-  }
-
   private static float clamp(float value, float min, float max) {
     if (max < min) return min;
     return Math.min(Math.max(value, min), max);
+  }
+
+  private static boolean vertical(int side) {
+    return side == TOP || side == BOTTOM;
   }
 
   private static int[] order(String preference) {
@@ -39,79 +57,55 @@ final class AnchorTipGeometry {
   private static float crossStart(float anchorStart, float anchorLength, float length, String align) {
     if ("start".equals(align)) return anchorStart;
     if ("end".equals(align)) return anchorStart + anchorLength - length;
-    return anchorStart + anchorLength / 2f - length / 2f;
+    return anchorStart + anchorLength / 2 - length / 2;
   }
 
-  static Layout compute(
-      Rect anchor,
-      float bubbleWidth,
-      float bubbleHeight,
-      float viewportWidth,
-      float viewportHeight,
-      Rect insets,
-      String preference,
-      String align,
-      float offset,
-      float arrowSize,
-      float margin,
-      float borderRadius) {
-    float spaceTop = anchor.top - insets.top - margin;
-    float spaceBottom = viewportHeight - insets.bottom - margin - anchor.bottom;
-    float spaceLeft = anchor.left - insets.left - margin;
-    float spaceRight = viewportWidth - insets.right - margin - anchor.right;
-    float reach = offset + arrowSize;
-    float usableWidth = viewportWidth - insets.left - insets.right - 2 * margin;
-    float usableHeight = viewportHeight - insets.top - insets.bottom - 2 * margin;
+  static Result compute(Input in) {
+    float reach = in.offset + in.arrowSize;
+    float[] space = new float[4];
+    space[TOP] = in.anchor.top - in.insetTop - in.margin;
+    space[BOTTOM] = in.viewportHeight - in.insetBottom - in.margin - in.anchor.bottom;
+    space[LEFT] = in.anchor.left - in.insetLeft - in.margin;
+    space[RIGHT] = in.viewportWidth - in.insetRight - in.margin - in.anchor.right;
+    float usableWidth = in.viewportWidth - in.insetLeft - in.insetRight - 2 * in.margin;
+    float usableHeight = in.viewportHeight - in.insetTop - in.insetBottom - 2 * in.margin;
 
-    int placement = spaceTop > spaceBottom ? TOP : BOTTOM;
-    for (int side : order(preference)) {
-      boolean fits;
-      switch (side) {
-        case TOP:
-          fits = spaceTop >= bubbleHeight + reach && bubbleWidth <= usableWidth;
-          break;
-        case BOTTOM:
-          fits = spaceBottom >= bubbleHeight + reach && bubbleWidth <= usableWidth;
-          break;
-        case LEFT:
-          fits = spaceLeft >= bubbleWidth + reach && bubbleHeight <= usableHeight;
-          break;
-        default:
-          fits = spaceRight >= bubbleWidth + reach && bubbleHeight <= usableHeight;
-          break;
-      }
+    int side = space[TOP] > space[BOTTOM] ? TOP : BOTTOM;
+    for (int candidate : order(in.preference)) {
+      boolean fits = vertical(candidate)
+          ? space[candidate] >= in.bubbleHeight + reach && in.bubbleWidth <= usableWidth
+          : space[candidate] >= in.bubbleWidth + reach && in.bubbleHeight <= usableHeight;
       if (fits) {
-        placement = side;
+        side = candidate;
         break;
       }
     }
 
-    float minX = insets.left + margin;
-    float maxX = viewportWidth - insets.right - margin - bubbleWidth;
-    float minY = insets.top + margin;
-    float maxY = viewportHeight - insets.bottom - margin - bubbleHeight;
+    float minX = in.insetLeft + in.margin;
+    float maxX = in.viewportWidth - in.insetRight - in.margin - in.bubbleWidth;
+    float minY = in.insetTop + in.margin;
+    float maxY = in.viewportHeight - in.insetBottom - in.margin - in.bubbleHeight;
     float x;
     float y;
-    if (isVertical(placement)) {
-      x = clamp(crossStart(anchor.left, anchor.width(), bubbleWidth, align), minX, maxX);
-      y = placement == BOTTOM ? anchor.bottom + reach : anchor.top - reach - bubbleHeight;
+    if (vertical(side)) {
+      x = clamp(crossStart(in.anchor.left, in.anchor.width(), in.bubbleWidth, in.align), minX, maxX);
+      y = side == BOTTOM ? in.anchor.bottom + reach : in.anchor.top - reach - in.bubbleHeight;
       y = clamp(y, minY, maxY);
     } else {
-      y = clamp(crossStart(anchor.top, anchor.height(), bubbleHeight, align), minY, maxY);
-      x = placement == RIGHT ? anchor.right + reach : anchor.left - reach - bubbleWidth;
+      y = clamp(crossStart(in.anchor.top, in.anchor.height(), in.bubbleHeight, in.align), minY, maxY);
+      x = side == RIGHT ? in.anchor.right + reach : in.anchor.left - reach - in.bubbleWidth;
       x = clamp(x, minX, maxX);
     }
 
-    boolean vertical = isVertical(placement);
-    float length = vertical ? bubbleWidth : bubbleHeight;
-    float center = vertical ? anchor.exactCenterX() - x : anchor.exactCenterY() - y;
-    float edge = Math.min(length / 2f, borderRadius + arrowSize);
+    float length = vertical(side) ? in.bubbleWidth : in.bubbleHeight;
+    float center = vertical(side) ? in.anchor.centerX() - x : in.anchor.centerY() - y;
+    float edge = Math.min(length / 2, in.borderRadius + in.arrowSize);
 
-    Layout layout = new Layout();
-    layout.placement = placement;
-    layout.x = x;
-    layout.y = y;
-    layout.arrowOffset = clamp(center, edge, length - edge);
-    return layout;
+    Result result = new Result();
+    result.side = side;
+    result.x = x;
+    result.y = y;
+    result.arrowOffset = clamp(center, edge, length - edge);
+    return result;
   }
 }

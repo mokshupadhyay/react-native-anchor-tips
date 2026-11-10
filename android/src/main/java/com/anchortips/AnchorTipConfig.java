@@ -44,14 +44,13 @@ final class AnchorTipConfig {
   boolean dismissOnBackdropPress = true;
   String animation = "scale";
   @Nullable String accessibilityLabel;
-  List<Action> actions = Collections.emptyList();
-
-  /** Anchor frame as measured by JavaScript, in dp. */
+  /** Anchor frame from `measureInWindow`, in dp. */
   float anchorX;
   float anchorY;
   float anchorWidth;
   float anchorHeight;
   @Nullable Integer anchorTag;
+  List<Action> actions = Collections.emptyList();
 
   @Nullable Integer backgroundColor;
   @Nullable Integer borderColor;
@@ -87,7 +86,6 @@ final class AnchorTipConfig {
   float shadowOpacity = 0.16f;
   float shadowRadius = 16;
   float shadowOffsetY = 6;
-  float elevation = 8;
 
   static AnchorTipConfig from(@Nullable ReadableMap map) {
     AnchorTipConfig config = new AnchorTipConfig();
@@ -157,9 +155,12 @@ final class AnchorTipConfig {
       config.shadowOpacity = (float) number(style, "shadowOpacity", 0.16);
       config.shadowRadius = (float) number(style, "shadowRadius", 16);
       config.shadowOffsetY = (float) number(style, "shadowOffsetY", 6);
-      config.elevation = (float) number(style, "elevation", 8);
     }
     return config;
+  }
+
+  float arrowHeight() {
+    return showArrow ? arrowSize : 0;
   }
 
   private static boolean present(ReadableMap map, String key) {

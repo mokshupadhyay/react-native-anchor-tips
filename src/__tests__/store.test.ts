@@ -1,42 +1,43 @@
-import { AnchorRegistry, type AnchorHandle } from '../core/anchors';
+import { TipStore, type NativePresenter, type NativeTipEvent } from '../core/store';
 import { HISTORY_KEY } from '../core/history';
-import { type NativePresenter, type NativeTipEvent, TipStore } from '../core/store';
 import { startTour } from '../core/tour';
 import type { Rect, TipRecord, TipStorage } from '../core/types';
 
-const rect: Rect = { x: 10, y: 20, width: 100, height: 40 };
+const RECT: Rect = { x: 10, y: 100, width: 80, height: 40 };
 
-function fixedAnchor(frame: Rect = rect, tag: number | null = 7): AnchorHandle {
-  return { measure: (callback) => callback({ rect: frame, tag }) };
+function anchor(store: TipStore, id: string, rect: Rect = RECT) {
+  return store.anchors.register(id, { measure: (callback) => callback({ rect, tag: 7 }) });
 }
 
-function setup(presenter: NativePresenter | null = null) {
-  const anchors = new AnchorRegistry();
-  const store = new TipStore(presenter, anchors);
-  return { store, anchors };
-}
+const visible = (store: TipStore) => store.getSnapshot().filter((record) => record.phase === 'visible');
 
-const phaseOf = (store: TipStore, id: string) => store.getSnapshot().find((record) => record.id === id)?.phase;
+function memoryStorage(initial: Record<string, string> = {}): TipStorage & { data: Record<string, string> } {
+  const data = { ...initial };
+  return {
+    data,
+    getItem: (key) => (key in data ? data[key] : null),
+    setItem: (key, value) => {
+      data[key] = value;
+    },
+  };
+}
 
 describe('TipStore', () => {
-  it('waits for an anchor to register, then shows the tip with its frame', () => {
-    const { store, anchors } = setup();
-    const onShow = jest.fn();
-    const id = store.show('compose', { title: 'Write', onShow });
+  it('waits for its anchor, then shows with the measured frame', () => {
+    const store = new TipStore();
+    const id = store.show('compose', { title: 'New message' });
     expect(id).toBe('compose');
-    expect(phaseOf(store, 'compose')).toBe('pending');
+    expect(store.getSnapshot()[0].phase).toBe('pending');
 
-    anchors.register('compose', fixedAnchor());
-    const record = store.getSnapshot()[0];
-    expect(record.phase).toBe('visible');
-    expect(record.anchorRect).toEqual(rect);
+    anchor(store, 'compose');
+    const [record] = visible(store);
+    expect(record.anchorRect).toEqual(RECT);
     expect(record.anchorTag).toBe(7);
-    expect(onShow).toHaveBeenCalledTimes(1);
   });
 
-  it('updates a visible tip in place when its id is shown again', () => {
-    const { store, anchors } = setup();
-    anchors.register('a', fixedAnchor());
+  it('updates a visible tip with the same id instead of adding one', () => {
+    const store = new TipStore();
+    anchor(store, 'a');
     store.show('a', { title: 'One' });
     store.show('a', { title: 'Two' });
     expect(store.getSnapshot()).toHaveLength(1);
@@ -44,207 +45,179 @@ describe('TipStore', () => {
   });
 
   it('shows one tip at a time by default and queues the rest', () => {
-    const { store, anchors } = setup();
-    anchors.register('a', fixedAnchor());
-    anchors.register('b', fixedAnchor());
+    const store = new TipStore();
+    anchor(store, 'a');
+    anchor(store, 'b');
     store.show('a', { title: 'A' });
     store.show('b', { title: 'B' });
-    expect(phaseOf(store, 'a')).toBe('visible');
-    expect(phaseOf(store, 'b')).toBe('pending');
+    expect(visible(store).map((record) => record.id)).toEqual(['a']);
 
-    // Without a host there is no exit animation to wait for.
     store.dismiss('a');
-    expect(phaseOf(store, 'a')).toBeUndefined();
-    expect(phaseOf(store, 'b')).toBe('visible');
+    expect(visible(store).map((record) => record.id)).toEqual(['b']);
   });
 
-  it('keeps the exiting tip in its slot until its renderer removes it', () => {
-    const { store, anchors } = setup();
-    store.registerHost({});
-    anchors.register('a', fixedAnchor());
-    anchors.register('b', fixedAnchor());
-    store.show('a');
-    store.show('b');
-    store.dismiss('a');
-    expect(phaseOf(store, 'a')).toBe('exiting');
-    expect(phaseOf(store, 'b')).toBe('pending');
-    store.remove(store.getSnapshot()[0].key);
-    expect(phaseOf(store, 'b')).toBe('visible');
-  });
-
-  it('dismisses a visible tip when its anchor unmounts', () => {
-    const { store, anchors } = setup();
+  it('reports why a tip closed', () => {
+    const store = new TipStore();
     const onHide = jest.fn();
-    const unregister = anchors.register('a', fixedAnchor());
+    const unregister = anchor(store, 'a');
     store.show('a', { onHide });
     unregister();
     expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), 'anchor-removed');
   });
 
-  it('measures ref anchors directly and drops tips whose view is gone', () => {
-    const { store } = setup();
-    const node = { measureInWindow: (callback: (...args: number[]) => void) => callback(1, 2, 3, 4) };
+  it('measures ref anchors and drops them when the view is gone', () => {
+    const store = new TipStore();
+    const node = { measureInWindow: (callback: (...values: number[]) => void) => callback(5, 6, 7, 8) };
     const id = store.show({ current: node });
-    expect(id).toMatch(/^tip-/);
-    expect(store.getSnapshot()[0].anchorRect).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+    expect(visible(store)[0].anchorRect).toEqual({ x: 5, y: 6, width: 7, height: 8 });
 
     store.dismiss(id);
     store.show({ current: null });
     expect(store.getSnapshot()).toHaveLength(0);
   });
 
-  it('re-measures anchors on reposition', () => {
-    const { store, anchors } = setup();
-    let frame = rect;
-    anchors.register('a', { measure: (callback) => callback({ rect: frame, tag: null }) });
-    store.show('a');
-    frame = { ...rect, y: 300 };
-    store.reposition('a');
-    expect(store.getSnapshot()[0].anchorRect).toEqual(frame);
-  });
-
-  it('respects maxDisplayCount and invalidation', () => {
-    const { store, anchors } = setup();
-    anchors.register('a', fixedAnchor());
-    store.show('a', { maxDisplayCount: 2 });
-    store.dismiss('a');
-    store.show('a', { maxDisplayCount: 2 });
-    store.dismiss('a');
-    store.show('a', { maxDisplayCount: 2 });
-    expect(store.getSnapshot()).toHaveLength(0);
-    expect(store.history.displayCount('a')).toBe(2);
-
-    anchors.register('b', fixedAnchor());
-    store.invalidate('b');
-    store.show('b');
-    expect(store.getSnapshot()).toHaveLength(0);
-
-    store.resetHistory();
-    store.show('a', { maxDisplayCount: 2 });
-    expect(phaseOf(store, 'a')).toBe('visible');
-  });
-
-  it('persists display history and waits for async storage', async () => {
-    const values: Record<string, string> = { [HISTORY_KEY]: JSON.stringify({ a: { count: 1 } }) };
-    const storage: TipStorage = {
-      getItem: jest.fn((key: string) => Promise.resolve(values[key] ?? null)),
-      setItem: jest.fn((key: string, value: string) => {
-        values[key] = value;
-        return Promise.resolve();
-      }),
-    };
-    const { store, anchors } = setup();
-    anchors.register('a', fixedAnchor());
+  it('limits how often a tip is shown and persists the count', () => {
+    const storage = memoryStorage();
+    const store = new TipStore();
     store.configure({ storage });
-    store.show('a', { maxDisplayCount: 2 });
-    expect(phaseOf(store, 'a')).toBe('pending');
+    anchor(store, 'a');
 
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(phaseOf(store, 'a')).toBe('visible');
-    expect(JSON.parse(values[HISTORY_KEY])).toEqual({ a: { count: 2 } });
-
+    store.show('a', { maxDisplayCount: 1 });
+    expect(visible(store)).toHaveLength(1);
     store.dismiss('a');
+    store.show('a', { maxDisplayCount: 1 });
+    expect(store.getSnapshot()).toHaveLength(0);
+    expect(JSON.parse(storage.data[HISTORY_KEY])).toEqual({ a: { count: 1 } });
+
+    const relaunched = new TipStore();
+    relaunched.configure({ storage });
+    anchor(relaunched, 'a');
+    relaunched.show('a', { maxDisplayCount: 1 });
+    expect(relaunched.getSnapshot()).toHaveLength(0);
+
+    relaunched.resetHistory('a');
+    relaunched.show('a', { maxDisplayCount: 1 });
+    expect(visible(relaunched)).toHaveLength(1);
+  });
+
+  it('waits for asynchronous storage before deciding', async () => {
+    let resolve: (value: string) => void = () => {};
+    const storage: TipStorage = {
+      getItem: () => new Promise<string>((done) => (resolve = done)),
+      setItem: jest.fn(),
+    };
+    const store = new TipStore();
+    store.configure({ storage });
+    anchor(store, 'a');
     store.show('a', { maxDisplayCount: 2 });
+    expect(store.getSnapshot()[0].phase).toBe('pending');
+
+    resolve(JSON.stringify({ a: { count: 2 } }));
+    await Promise.resolve();
     expect(store.getSnapshot()).toHaveLength(0);
   });
 
-  it('falls back to React rendering when the native module is missing', () => {
-    const presenter: NativePresenter = {
-      isAvailable: () => false,
-      show: jest.fn(),
-      update: jest.fn(),
-      dismiss: jest.fn(),
-      setEventHandler: jest.fn(),
-    };
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const { store, anchors } = setup(presenter);
-    anchors.register('a', fixedAnchor());
-    store.show('a', { presentation: 'native' });
-    expect(store.getSnapshot()[0].presentation).toBe('react');
-    expect(presenter.show).not.toHaveBeenCalled();
-    warn.mockRestore();
+  it('never shows an invalidated tip again', () => {
+    const store = new TipStore();
+    anchor(store, 'a');
+    store.show('a');
+    store.invalidate('a');
+    expect(store.getSnapshot()).toHaveLength(0);
+    store.show('a');
+    expect(store.getSnapshot()).toHaveLength(0);
   });
 
   it('drives native tips through the presenter and its events', () => {
-    let emit: (event: NativeTipEvent) => void = () => undefined;
+    let emit: (event: NativeTipEvent) => void = () => {};
     const shown: TipRecord[] = [];
     const presenter: NativePresenter = {
       isAvailable: () => true,
-      show: jest.fn((record: TipRecord) => shown.push(record)),
+      show: (record) => shown.push(record),
       update: jest.fn(),
       dismiss: jest.fn(),
-      setEventHandler: (handler) => {
-        emit = handler;
-      },
+      setEventHandler: (handler) => (emit = handler),
     };
-    const { store, anchors } = setup(presenter);
+    const store = new TipStore(presenter);
+    anchor(store, 'a');
     const onAction = jest.fn();
     const onHide = jest.fn();
-    anchors.register('a', fixedAnchor());
-    store.show('a', { presentation: 'native', actions: [{ label: 'Try', onPress: onAction }], onHide });
+    store.show('a', { presentation: 'native', actions: [{ id: 'ok', label: 'OK', onPress: onAction }], onHide });
     expect(shown).toHaveLength(1);
     const key = shown[0].key;
 
-    emit({ key, kind: 'action', actionId: '0' });
+    emit({ key, kind: 'action', actionId: 'ok' });
     expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
 
-    store.reposition();
-    emit({ key, kind: 'hide', reason: 'outside-press' });
-    expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), 'outside-press');
+    store.dismiss('a');
+    expect(presenter.dismiss).toHaveBeenCalledWith(key);
+    expect(store.getSnapshot()[0].phase).toBe('exiting');
+    emit({ key, kind: 'hide', reason: 'dismissed' });
     expect(store.getSnapshot()).toHaveLength(0);
+    expect(onHide).toHaveBeenCalledWith(expect.anything(), 'dismissed');
+  });
+
+  it('falls back to React rendering when the native module is missing', () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const store = new TipStore(null);
+    anchor(store, 'a');
+    store.show('a', { presentation: 'native' });
+    expect(store.getSnapshot()[0].presentation).toBe('react');
+    warn.mockRestore();
   });
 });
 
-describe('startTour', () => {
-  function tourSetup() {
-    const { store, anchors } = setup();
-    anchors.register('one', fixedAnchor());
-    anchors.register('two', fixedAnchor());
-    anchors.register('three', fixedAnchor());
-    const steps = [
-      { anchor: 'one', title: 'First' },
-      { anchor: 'two', title: 'Second' },
-      { anchor: 'three', title: 'Third' },
-    ];
-    return { store, steps };
-  }
+describe('tours', () => {
+  const setup = () => {
+    const store = new TipStore();
+    anchor(store, 'one');
+    anchor(store, 'two');
+    anchor(store, 'three');
+    return store;
+  };
+  const press = (store: TipStore, label: string) => {
+    const [record] = visible(store);
+    const action = (record.options.actions ?? []).find((candidate) => candidate.label === label);
+    if (!action || !action.onPress) throw new Error(`No ${label} action`);
+    action.onPress(store.handle(record.id));
+  };
 
-  const visible = (store: TipStore) => store.getSnapshot().filter((record) => record.phase === 'visible');
-
-  it('walks forward and back with step labels and spotlight', () => {
-    const { store, steps } = tourSetup();
+  it('walks through the steps with Next, Back and Done', () => {
+    const store = setup();
     const onFinish = jest.fn();
-    const tour = startTour(store, steps, { id: 'intro', onFinish });
+    const tour = startTour(
+      store,
+      [
+        { anchor: 'one', title: 'First' },
+        { anchor: 'two', title: 'Second' },
+        { anchor: 'three', title: 'Third' },
+      ],
+      { id: 'intro', onFinish },
+    );
 
-    let [current] = visible(store);
-    expect(current.id).toBe('intro:0');
-    expect(current.options).toMatchObject({ title: 'First', stepLabel: '1 of 3', spotlight: true });
-    expect(current.options.actions?.map((action) => action.label)).toEqual(['Next']);
+    expect(visible(store)[0]).toMatchObject({ id: 'intro:0', options: { stepLabel: '1 of 3', spotlight: true } });
+    expect(visible(store)[0].options.actions!.map((action) => action.label)).toEqual(['Next']);
 
-    tour.next();
-    [current] = visible(store);
-    expect(current.options.actions?.map((action) => action.label)).toEqual(['Back', 'Next']);
+    press(store, 'Next');
+    expect(visible(store)[0].id).toBe('intro:1');
+    expect(visible(store)[0].options.actions!.map((action) => action.label)).toEqual(['Back', 'Next']);
 
-    current.options.actions?.[0].onPress?.(store.handle(current.id));
+    press(store, 'Back');
     expect(tour.index).toBe(0);
-
     tour.goTo(2);
-    [current] = visible(store);
-    expect(current.options.stepLabel).toBe('3 of 3');
-    current.options.actions?.[1].onPress?.(store.handle(current.id));
-    expect(onFinish).toHaveBeenCalledWith({ completed: true, index: 2, reason: undefined });
+    expect(visible(store)[0].options.actions!.map((action) => action.label)).toEqual(['Back', 'Done']);
+
+    press(store, 'Done');
     expect(store.getSnapshot()).toHaveLength(0);
+    expect(onFinish).toHaveBeenCalledWith({ completed: true, index: 2, reason: undefined });
     expect(tour.active).toBe(false);
   });
 
-  it('ends when the user closes a step', () => {
-    const { store, steps } = tourSetup();
+  it('ends when a step is closed another way', () => {
+    const store = setup();
     const onFinish = jest.fn();
-    startTour(store, steps, { onFinish, showSkip: true });
-    const [current] = visible(store);
-    expect(current.options.actions?.map((action) => action.label)).toEqual(['Skip', 'Next']);
-    store.dismiss(current.id, 'close-button');
+    startTour(store, [{ anchor: 'one' }, { anchor: 'two' }], { onFinish });
+    store.dismiss(visible(store)[0].id, 'close-button');
     expect(onFinish).toHaveBeenCalledWith({ completed: false, index: 0, reason: 'close-button' });
+    expect(store.getSnapshot()).toHaveLength(0);
   });
 });

@@ -1,6 +1,6 @@
 # react-native-anchor-tips
 
-[![npm](https://img.shields.io/npm/v/react-native-anchor-tips/beta?label=npm%40beta)](https://www.npmjs.com/package/react-native-anchor-tips)
+[![npm](https://img.shields.io/npm/v/react-native-anchor-tips?label=npm)](https://www.npmjs.com/package/react-native-anchor-tips)
 [![license](https://img.shields.io/npm/l/react-native-anchor-tips)](https://github.com/mokshupadhyay/react-native-anchor-tips/blob/main/LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-mokshupadhyay%2Freact--native--anchor--tips-181717?logo=github)](https://github.com/mokshupadhyay/react-native-anchor-tips)
 
@@ -31,11 +31,11 @@ Tooltips, tips and guided tours anchored to any view in React Native, on the old
 ## Install
 
 ```sh
-npm install react-native-anchor-tips@beta
+npm install react-native-anchor-tips
 cd ios && pod install
 ```
 
-The current release is a beta. iOS has been run on React Native 0.88 (New Architecture). The Android native module compiles but has not yet been tested on a device, so please [report issues](https://github.com/mokshupadhyay/react-native-anchor-tips/issues).
+It has been run on React Native 0.88 (New Architecture) on the iOS simulator and an Android API 37 emulator. Please [report issues](https://github.com/mokshupadhyay/react-native-anchor-tips/issues), especially from older React Native releases and physical Android devices.
 
 Android links automatically. React-rendered tips need no native code, so they also work in Expo Go. Native presentation requires a development build or a bare app.
 

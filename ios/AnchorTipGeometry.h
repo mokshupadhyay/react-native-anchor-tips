@@ -2,34 +2,34 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-typedef NS_ENUM(NSInteger, AnchorTipPlacement) {
-  AnchorTipPlacementTop,
-  AnchorTipPlacementBottom,
-  AnchorTipPlacementLeft,
-  AnchorTipPlacementRight,
+/** The side of the anchor the bubble sits on. */
+typedef NS_ENUM(NSInteger, AnchorTipSide) {
+  AnchorTipSideTop,
+  AnchorTipSideBottom,
+  AnchorTipSideLeft,
+  AnchorTipSideRight,
 };
 
 typedef struct {
-  AnchorTipPlacement placement;
-  /** Frame of the bubble body, without the arrow. */
-  CGRect frame;
-  /** Arrow center along the edge facing the anchor, from the body's left (top/bottom) or top (left/right). */
+  AnchorTipSide side;
+  /** Top-left corner of the bubble body. */
+  CGFloat x;
+  CGFloat y;
+  /** Arrow center along the edge facing the anchor. */
   CGFloat arrowOffset;
-} AnchorTipLayout;
+} AnchorTipPlacement;
 
-/** Port of `computePlacement` in src/core/geometry.ts; keep the two in sync. */
-FOUNDATION_EXPORT AnchorTipLayout AnchorTipComputeLayout(
+/** Port of `computePlacement` in `src/core/geometry.ts`; keep the two in sync. */
+FOUNDATION_EXPORT AnchorTipPlacement AnchorTipComputePlacement(
     CGRect anchor,
     CGSize bubble,
     CGSize viewport,
     UIEdgeInsets insets,
-    NSString *_Nullable preference,
-    NSString *_Nullable align,
+    NSString *preference,
+    NSString *align,
     CGFloat offset,
     CGFloat arrowSize,
     CGFloat margin,
     CGFloat borderRadius);
-
-FOUNDATION_EXPORT BOOL AnchorTipPlacementIsVertical(AnchorTipPlacement placement);
 
 NS_ASSUME_NONNULL_END
