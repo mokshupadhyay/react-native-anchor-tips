@@ -36,7 +36,12 @@ import { resolveTipVisuals } from '../theme/themes';
 import { DefaultTip } from './DefaultTip';
 
 /** Distance the bubble travels toward its anchor while it scales in. */
-const SCALE_TRAVEL = 8;
+const SCALE_TRAVEL = 6;
+/** Scale the bubble grows from when it appears, and shrinks to when it leaves. */
+const ENTER_SCALE = 0.94;
+const EXIT_SCALE = 0.96;
+const ENTER_EASING = Easing.bezier(0.2, 0.9, 0.3, 1);
+const EXIT_EASING = Easing.bezier(0.4, 0, 1, 1);
 
 export interface TipItemProps {
   record: TipRecord;
@@ -140,7 +145,7 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
   React.useEffect(() => {
     if (!isVisible || !ready) return;
     if (noMotion) progress.setValue(1);
-    else Animated.timing(progress, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    else Animated.timing(progress, { toValue: 1, duration: 240, easing: ENTER_EASING, useNativeDriver: true }).start();
     const label = accessibilityLabelFor(options);
     if (label && Platform.OS === 'ios' && AccessibilityInfo.announceForAccessibility) {
       AccessibilityInfo.announceForAccessibility(label);
@@ -156,7 +161,7 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
       if (mounted.current) store.remove(record.key);
     };
     if (noMotion || !ready) finish();
-    else Animated.timing(progress, { toValue: 0, duration: 150, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(finish);
+    else Animated.timing(progress, { toValue: 0, duration: 140, easing: EXIT_EASING, useNativeDriver: true }).start(finish);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record.phase]);
 
@@ -215,7 +220,13 @@ export function TipItem(props: TipItemProps): React.ReactElement | null {
       ? [
           { translateX: progress.interpolate({ inputRange: [0, 1], outputRange: [shift.x, 0] }) },
           { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [shift.y, 0] }) },
-          { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) },
+          {
+            scale: progress.interpolate({
+              inputRange: [0, 1],
+              // The switch happens at progress 1, where both ranges give 1.
+              outputRange: [record.phase === 'exiting' ? EXIT_SCALE : ENTER_SCALE, 1],
+            }),
+          },
         ]
       : [],
   };
@@ -362,6 +373,8 @@ const baseStyles = StyleSheet.create({
   },
   arrow: {
     position: 'absolute',
+    // Rounds the apex; the other corners sit under the bubble.
+    borderRadius: 2,
     transform: [{ rotate: '45deg' }],
   },
   absolute: {

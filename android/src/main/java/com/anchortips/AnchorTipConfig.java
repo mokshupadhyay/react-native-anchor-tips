@@ -70,22 +70,24 @@ final class AnchorTipConfig {
   @Nullable String fontFamily;
   float titleFontSize = 15;
   int titleFontWeight = 600;
+  float titleLineHeight = 20;
   float messageFontSize = 14;
-  float actionFontSize = 15;
+  float messageLineHeight = 19;
+  float actionFontSize = 14;
   int actionFontWeight = 600;
   float stepFontSize = 13;
   float padding = 14;
   float maxWidth = 320;
   float margin = 12;
   float offset = 4;
-  float arrowSize = 8;
+  float arrowSize = 7;
   float iconSize = 22;
-  float spotlightPadding = 6;
-  float spotlightRadius = 12;
+  float spotlightPadding = 8;
+  float spotlightRadius = 16;
   boolean shadowEnabled = true;
-  float shadowOpacity = 0.16f;
-  float shadowRadius = 16;
-  float shadowOffsetY = 6;
+  float shadowOpacity = 0.12f;
+  float shadowRadius = 20;
+  float shadowOffsetY = 8;
 
   static AnchorTipConfig from(@Nullable ReadableMap map) {
     AnchorTipConfig config = new AnchorTipConfig();
@@ -139,22 +141,24 @@ final class AnchorTipConfig {
       config.fontFamily = string(style, "fontFamily", null);
       config.titleFontSize = (float) number(style, "titleFontSize", 15);
       config.titleFontWeight = weight(style, "titleFontWeight", 600);
+      config.titleLineHeight = (float) number(style, "titleLineHeight", 20);
       config.messageFontSize = (float) number(style, "messageFontSize", 14);
-      config.actionFontSize = (float) number(style, "actionFontSize", 15);
+      config.messageLineHeight = (float) number(style, "messageLineHeight", Math.round(config.messageFontSize * 1.35));
+      config.actionFontSize = (float) number(style, "actionFontSize", 14);
       config.actionFontWeight = weight(style, "actionFontWeight", 600);
       config.stepFontSize = (float) number(style, "stepFontSize", 13);
       config.padding = (float) number(style, "padding", 14);
       config.maxWidth = (float) number(style, "maxWidth", 320);
       config.margin = (float) number(style, "margin", 12);
       config.offset = (float) number(style, "offset", 4);
-      config.arrowSize = (float) number(style, "arrowSize", 8);
+      config.arrowSize = (float) number(style, "arrowSize", 7);
       config.iconSize = (float) number(style, "iconSize", 22);
-      config.spotlightPadding = (float) number(style, "spotlightPadding", 6);
-      config.spotlightRadius = (float) number(style, "spotlightRadius", 12);
+      config.spotlightPadding = (float) number(style, "spotlightPadding", 8);
+      config.spotlightRadius = (float) number(style, "spotlightRadius", 16);
       config.shadowEnabled = bool(style, "shadowEnabled", true);
-      config.shadowOpacity = (float) number(style, "shadowOpacity", 0.16);
-      config.shadowRadius = (float) number(style, "shadowRadius", 16);
-      config.shadowOffsetY = (float) number(style, "shadowOffsetY", 6);
+      config.shadowOpacity = (float) number(style, "shadowOpacity", 0.12);
+      config.shadowRadius = (float) number(style, "shadowRadius", 20);
+      config.shadowOffsetY = (float) number(style, "shadowOffsetY", 8);
     }
     return config;
   }

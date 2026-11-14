@@ -43,8 +43,10 @@ describe('serializeNativeTip', () => {
     });
     const style = config.style as Record<string, unknown>;
     expect(typeof style.backgroundColor).toBe('number');
-    expect(style.iconColor).toBe(style.primaryBackgroundColor);
-    expect(style.arrowSize).toBe(8);
+    expect(style.iconColor).toBe(style.actionColor);
+    expect(style.arrowSize).toBe(7);
+    expect(style.titleLineHeight).toBe(20);
+    expect(style.messageLineHeight).toBe(19);
     expect(JSON.parse(JSON.stringify(config))).toEqual(config);
   });
 

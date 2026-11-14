@@ -1,5 +1,6 @@
 package com.anchortipsexample
 
+import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -18,5 +19,10 @@ class MainActivity : ReactActivity() {
    * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
-      DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+      object : DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled) {
+        // Passes `--es demo <name>` from `adb shell am start` to App as the
+        // `demo` prop, to run the screenshot scripts in App.tsx.
+        override fun getLaunchOptions(): Bundle? =
+            intent?.getStringExtra("demo")?.let { demo -> Bundle().apply { putString("demo", demo) } }
+      }
 }

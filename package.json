@@ -1,6 +1,6 @@
 {
   "name": "react-native-anchor-tips",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Tooltips, tips and guided tours anchored to any view in React Native: smart placement, arrows, spotlight, show-once rules, and an optional native overlay that works on the old and new architecture.",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",

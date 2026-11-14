@@ -1,15 +1,18 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { TipAction, TipRenderProps } from '../core/types';
-import { resolveTipVisuals } from '../theme/themes';
+import { resolveLineHeights, resolveTipVisuals } from '../theme/themes';
 
 const HIT_SLOP = { top: 10, bottom: 10, left: 10, right: 10 };
+/** Grows the 28pt close box to a 44pt touch target. */
+const CLOSE_HIT_SLOP = { top: 8, bottom: 8, left: 8, right: 8 };
 
 /** The built-in tip content. The bubble and arrow around it are drawn by the host. */
 export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
   const { options, theme, styles, dismiss, tip } = props;
   const visuals = resolveTipVisuals(theme, options.variant ?? theme.variant);
   const { layout, typography } = theme;
+  const lineHeights = resolveLineHeights(typography);
   const font = typography.fontFamily ? { fontFamily: typography.fontFamily } : null;
   const handle = { id: tip.id, dismiss, update: props.update };
   const hasFooter = options.actions.length > 0 || Boolean(options.stepLabel);
@@ -41,7 +44,7 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
           {options.title ? (
             <Text
               style={[
-                { color: visuals.title, fontSize: typography.titleSize, fontWeight: typography.titleWeight },
+                { color: visuals.title, fontSize: typography.titleSize, fontWeight: typography.titleWeight, lineHeight: lineHeights.title },
                 font,
                 styles.title,
               ]}>
@@ -51,7 +54,7 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
           {options.message ? (
             <Text
               style={[
-                { color: visuals.message, fontSize: typography.messageSize, lineHeight: Math.round(typography.messageSize * 1.35) },
+                { color: visuals.message, fontSize: typography.messageSize, lineHeight: lineHeights.message },
                 options.title ? baseStyles.messageBelowTitle : null,
                 font,
                 styles.message,
@@ -64,17 +67,17 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Dismiss"
-            hitSlop={HIT_SLOP}
+            hitSlop={CLOSE_HIT_SLOP}
             onPress={() => dismiss('close-button')}
             style={[baseStyles.close, styles.closeButton]}>
-            <Text style={[{ color: visuals.closeIcon, fontSize: 14 }, styles.closeIcon]}>✕</Text>
+            <Text style={[baseStyles.closeGlyph, { color: visuals.closeIcon }, styles.closeIcon]}>✕</Text>
           </TouchableOpacity>
         ) : null}
       </View>
       {hasFooter ? (
         <View style={[baseStyles.footer, styles.footer]}>
           {options.stepLabel ? (
-            <Text style={[baseStyles.step, { color: visuals.step, fontSize: typography.stepSize }, font, styles.step]}>
+            <Text style={[baseStyles.step, baseStyles.stepText, { color: visuals.step, fontSize: typography.stepSize }, font, styles.step]}>
               {options.stepLabel}
             </Text>
           ) : (
@@ -83,11 +86,16 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
           <View style={[baseStyles.actions, styles.actions]}>
             {options.actions.map((action, index) => {
               const primary = action.style === 'primary';
+              const cancel = action.style === 'cancel';
+              // Hierarchy: a filled primary, colored default and destructive
+              // actions, and a neutral cancel.
               const color = primary
                 ? visuals.primaryText
                 : action.style === 'destructive'
                   ? visuals.destructive
-                  : visuals.action;
+                  : cancel
+                    ? visuals.message
+                    : visuals.action;
               return (
                 <TouchableOpacity
                   key={action.id ?? String(index)}
@@ -95,8 +103,7 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
                   hitSlop={HIT_SLOP}
                   onPress={() => onAction(action)}
                   style={[
-                    baseStyles.action,
-                    primary && [baseStyles.primary, { backgroundColor: visuals.primaryBackground }],
+                    primary ? [baseStyles.primary, { backgroundColor: visuals.primaryBackground }] : baseStyles.action,
                     styles.action,
                   ]}>
                   <Text
@@ -104,7 +111,7 @@ export function DefaultTip(props: TipRenderProps<unknown>): React.ReactElement {
                       {
                         color,
                         fontSize: typography.actionSize,
-                        fontWeight: action.style === 'cancel' ? '400' : typography.actionWeight,
+                        fontWeight: cancel ? '500' : typography.actionWeight,
                       },
                       font,
                       styles.actionText,
@@ -137,32 +144,46 @@ const baseStyles = StyleSheet.create({
     flexShrink: 1,
   },
   messageBelowTitle: {
-    marginTop: 3,
+    marginTop: 2,
   },
   close: {
-    marginLeft: 12,
-    marginTop: 1,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    marginTop: -4,
+    marginRight: -6,
+  },
+  closeGlyph: {
+    fontSize: 13,
+    fontWeight: '500',
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 14,
   },
   step: {
     flexGrow: 1,
     marginRight: 12,
+  },
+  stepText: {
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   action: {
-    marginLeft: 16,
-    paddingVertical: 4,
+    marginLeft: 20,
+    paddingVertical: 6,
   },
   primary: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
+    marginLeft: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     borderRadius: 999,
   },
 });

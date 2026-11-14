@@ -8,17 +8,19 @@ const sharedLayout: TipTheme['layout'] = {
   maxWidth: 320,
   margin: 12,
   offset: 4,
-  arrowSize: 8,
+  arrowSize: 7,
   iconSize: 22,
-  spotlightPadding: 6,
-  spotlightRadius: 12,
+  spotlightPadding: 8,
+  spotlightRadius: 16,
 };
 
 const sharedTypography: TipTheme['typography'] = {
   titleSize: 15,
   titleWeight: '600',
+  titleLineHeight: 20,
   messageSize: 14,
-  actionSize: 15,
+  messageLineHeight: 19,
+  actionSize: 14,
   actionWeight: '600',
   stepSize: 13,
 };
@@ -27,55 +29,63 @@ export const lightTheme: TipTheme = {
   variant: 'card',
   colors: {
     background: '#FFFFFF',
-    title: '#111827',
-    message: '#4B5563',
-    border: '#E5E7EB',
+    title: '#18181B',
+    message: '#52525B',
+    border: 'rgba(24, 24, 27, 0.08)',
     shadow: '#000000',
     accent: '#2563EB',
     onAccent: '#FFFFFF',
     action: '#2563EB',
     destructive: '#DC2626',
-    closeIcon: '#9CA3AF',
-    step: '#6B7280',
-    backdrop: 'rgba(17, 24, 39, 0.55)',
-    invertedBackground: '#111827',
-    invertedTitle: '#F9FAFB',
-    invertedMessage: '#D1D5DB',
+    closeIcon: '#71717A',
+    step: '#71717A',
+    backdrop: 'rgba(9, 9, 11, 0.48)',
+    invertedBackground: '#18181B',
+    invertedTitle: '#FAFAFA',
+    invertedMessage: '#D4D4D8',
     invertedAction: '#93C5FD',
   },
   layout: sharedLayout,
   typography: sharedTypography,
-  shadow: { enabled: true, opacity: 0.16, radius: 16, offsetY: 6, elevation: 8 },
+  shadow: { enabled: true, opacity: 0.12, radius: 20, offsetY: 8, elevation: 6 },
 };
 
 export const darkTheme: TipTheme = {
   variant: 'card',
   colors: {
-    background: '#1F2937',
-    title: '#F9FAFB',
-    message: '#D1D5DB',
-    border: '#374151',
+    background: '#27272A',
+    title: '#FAFAFA',
+    message: '#D4D4D8',
+    border: 'rgba(255, 255, 255, 0.08)',
     shadow: '#000000',
-    accent: '#3B82F6',
+    accent: '#2563EB',
     onAccent: '#FFFFFF',
     action: '#60A5FA',
     destructive: '#F87171',
-    closeIcon: '#9CA3AF',
-    step: '#9CA3AF',
-    backdrop: 'rgba(0, 0, 0, 0.6)',
-    invertedBackground: '#F9FAFB',
-    invertedTitle: '#111827',
-    invertedMessage: '#4B5563',
+    closeIcon: '#A1A1AA',
+    step: '#A1A1AA',
+    backdrop: 'rgba(0, 0, 0, 0.64)',
+    invertedBackground: '#FAFAFA',
+    invertedTitle: '#18181B',
+    invertedMessage: '#52525B',
     invertedAction: '#2563EB',
   },
   layout: sharedLayout,
   typography: sharedTypography,
-  shadow: { enabled: true, opacity: 0.4, radius: 18, offsetY: 8, elevation: 10 },
+  shadow: { enabled: true, opacity: 0.5, radius: 20, offsetY: 8, elevation: 6 },
 };
 
 /** Build a complete theme from a base theme and any number of overrides. */
 export function createTheme(base: TipTheme, ...overrides: Array<TipThemeOverrides | undefined>): TipTheme {
   return deepMerge(base, ...overrides);
+}
+
+/** Line heights of the title and message, with defaults for themes built before these tokens existed. */
+export function resolveLineHeights(typography: TipTheme['typography']): { title: number; message: number } {
+  return {
+    title: typography.titleLineHeight ?? Math.round(typography.titleSize * 1.33),
+    message: typography.messageLineHeight ?? Math.round(typography.messageSize * 1.35),
+  };
 }
 
 /** Concrete colors of one tip after applying its variant. */
@@ -107,7 +117,9 @@ export function resolveTipVisuals(theme: TipTheme, variant: TipVariant = theme.v
     borderWidth: layout.borderWidth,
     title: colors.title,
     message: colors.message,
-    icon: colors.accent,
+    // The action color rather than the accent: in the dark theme the accent is
+    // tuned for white text on the primary button and is too dark for a glyph.
+    icon: colors.action,
     action: colors.action,
     primaryBackground: colors.accent,
     primaryText: colors.onAccent,

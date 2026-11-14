@@ -8,6 +8,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -15,9 +16,10 @@ import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.TouchDelegate;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.DecelerateInterpolator;
+import android.view.animation.PathInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -30,6 +32,11 @@ import androidx.annotation.Nullable;
  */
 @SuppressLint("ViewConstructor")
 final class AnchorTipView extends ViewGroup {
+  /** Radius of the rounded arrow apex, measured along each arrow edge, in dp. */
+  private static final float APEX_ROUNDING = 2;
+  /** Distance the bubble travels toward its anchor while it scales in, in dp. */
+  private static final float TRAVEL = 6;
+
   interface Listener {
     void onPress(AnchorTipView view);
     void onAction(AnchorTipView view, AnchorTipConfig.Action action);
@@ -85,6 +92,9 @@ final class AnchorTipView extends ViewGroup {
 
     row = new LinearLayout(context);
     row.setOrientation(LinearLayout.HORIZONTAL);
+    // The close box overhangs the row by a few dp, like the React renderer.
+    row.setClipChildren(false);
+    content.setClipChildren(false);
     content.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
     iconView = new TextView(context);
@@ -101,6 +111,8 @@ final class AnchorTipView extends ViewGroup {
 
     closeButton = new TextView(context);
     closeButton.setText("\u2715");
+    closeButton.setGravity(Gravity.CENTER);
+    closeButton.setIncludeFontPadding(false);
     closeButton.setContentDescription("Dismiss");
     closeButton.setOnClickListener(new OnClickListener() {
       @Override
@@ -108,7 +120,7 @@ final class AnchorTipView extends ViewGroup {
         if (!dismissing) AnchorTipView.this.listener.onClose(AnchorTipView.this);
       }
     });
-    row.addView(closeButton);
+    row.addView(closeButton, closeParams());
 
     footer = new LinearLayout(context);
     footer.setOrientation(LinearLayout.HORIZONTAL);
@@ -130,6 +142,26 @@ final class AnchorTipView extends ViewGroup {
 
   private int dp(float value) {
     return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
+  }
+
+  /** A 28dp box, 8dp after the text, overhanging the row by 4dp at the top and 6dp at the end. */
+  private LinearLayout.LayoutParams closeParams() {
+    LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(28), dp(28));
+    params.leftMargin = dp(8);
+    params.topMargin = dp(-4);
+    params.rightMargin = dp(-6);
+    return params;
+  }
+
+  /** Sets a fixed line height in sp, like React Native's `lineHeight`. */
+  private void setLineHeightSp(TextView view, float lineHeight) {
+    int px = Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, lineHeight, getResources().getDisplayMetrics()));
+    if (Build.VERSION.SDK_INT >= 28) {
+      view.setLineHeight(px);
+    } else {
+      int fontHeight = view.getPaint().getFontMetricsInt(null);
+      view.setLineSpacing(px - fontHeight, 1f);
+    }
   }
 
   private static int colorOr(@Nullable Integer value, int fallback) {
@@ -180,29 +212,32 @@ final class AnchorTipView extends ViewGroup {
     titleView.setTextColor(colorOr(next.titleColor, Color.BLACK));
     titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, next.titleFontSize);
     titleView.setTypeface(typeface(next.fontFamily, next.titleFontWeight));
+    setLineHeightSp(titleView, next.titleLineHeight);
 
     messageView.setVisibility(next.message != null ? VISIBLE : GONE);
     messageView.setText(next.message);
     messageView.setTextColor(colorOr(next.messageColor, Color.DKGRAY));
     messageView.setTextSize(TypedValue.COMPLEX_UNIT_SP, next.messageFontSize);
     messageView.setTypeface(typeface(next.fontFamily, 400));
-    messageView.setLineSpacing(0, 1.2f);
-    messageView.setPadding(0, next.title != null ? dp(3) : 0, 0, 0);
+    setLineHeightSp(messageView, next.messageLineHeight);
+    messageView.setPadding(0, next.title != null ? dp(2) : 0, 0, 0);
 
     closeButton.setVisibility(next.showCloseButton ? VISIBLE : GONE);
     closeButton.setTextColor(colorOr(next.closeColor, Color.GRAY));
-    closeButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-    closeButton.setPadding(dp(12), 0, 0, 0);
+    closeButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+    closeButton.setTypeface(typeface(null, 500));
 
     stepView.setText(next.stepLabel);
     stepView.setTextColor(colorOr(next.stepColor, Color.GRAY));
     stepView.setTextSize(TypedValue.COMPLEX_UNIT_SP, next.stepFontSize);
-    stepView.setTypeface(typeface(next.fontFamily, 400));
+    stepView.setTypeface(typeface(next.fontFamily, 500));
+    // Digits of equal width, so "2 of 3" keeps its width between steps.
+    stepView.setFontFeatureSettings("tnum");
 
     rebuildActions(next);
     boolean hasFooter = next.stepLabel != null || !next.actions.isEmpty();
     footer.setVisibility(hasFooter ? VISIBLE : GONE);
-    footer.setPadding(0, hasFooter ? dp(12) : 0, 0, 0);
+    footer.setPadding(0, hasFooter ? dp(14) : 0, 0, 0);
 
     setContentDescription(next.accessibilityLabel);
     bubbleWidth = 0;
@@ -216,20 +251,24 @@ final class AnchorTipView extends ViewGroup {
       TextView button = new TextView(getContext());
       button.setText(action.label);
       boolean primary = "primary".equals(action.style);
+      boolean cancel = "cancel".equals(action.style);
+      // Hierarchy: a filled primary, colored default and destructive actions, and a neutral cancel.
       int color = primary
           ? colorOr(next.primaryTextColor, Color.WHITE)
-          : "destructive".equals(action.style) ? colorOr(next.destructiveColor, Color.RED) : colorOr(next.actionColor, Color.BLUE);
+          : "destructive".equals(action.style) ? colorOr(next.destructiveColor, Color.RED)
+          : cancel ? colorOr(next.messageColor, Color.DKGRAY)
+          : colorOr(next.actionColor, Color.BLUE);
       button.setTextColor(color);
       button.setTextSize(TypedValue.COMPLEX_UNIT_SP, next.actionFontSize);
-      button.setTypeface(typeface(next.fontFamily, "cancel".equals(action.style) ? 400 : next.actionFontWeight));
+      button.setTypeface(typeface(next.fontFamily, cancel ? 500 : next.actionFontWeight));
       if (primary) {
         GradientDrawable pill = new GradientDrawable();
         pill.setColor(colorOr(next.primaryBackgroundColor, Color.BLUE));
         pill.setCornerRadius(dp(999));
         button.setBackground(pill);
-        button.setPadding(dp(14), dp(7), dp(14), dp(7));
+        button.setPadding(dp(16), dp(8), dp(16), dp(8));
       } else {
-        button.setPadding(0, dp(4), 0, dp(4));
+        button.setPadding(0, dp(6), 0, dp(6));
       }
       button.setOnClickListener(new OnClickListener() {
         @Override
@@ -239,7 +278,7 @@ final class AnchorTipView extends ViewGroup {
       });
       LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
           LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-      params.leftMargin = dp(16);
+      params.leftMargin = dp(primary ? 12 : 20);
       actionsRow.addView(button, params);
     }
     actionsRow.setVisibility(next.actions.isEmpty() ? GONE : VISIBLE);
@@ -280,6 +319,21 @@ final class AnchorTipView extends ViewGroup {
     content.layout(inset, inset, inset + bubbleWidth, inset + bubbleHeight);
     setPivotX(arrowPivotX());
     setPivotY(arrowPivotY());
+    updateCloseTouchTarget();
+  }
+
+  /** Grows the 28dp close box to a 44dp touch target. */
+  private void updateCloseTouchTarget() {
+    if (closeButton.getVisibility() != VISIBLE) {
+      content.setTouchDelegate(null);
+      return;
+    }
+    Rect hit = new Rect();
+    closeButton.getHitRect(hit);
+    hit.offset(row.getLeft(), row.getTop());
+    int grow = dp(8);
+    hit.inset(-grow, -grow);
+    content.setTouchDelegate(new TouchDelegate(hit, closeButton));
   }
 
   private float arrowPivotX() {
@@ -321,34 +375,36 @@ final class AnchorTipView extends ViewGroup {
     path.reset();
     path.moveTo(l + r, t);
     if (arrow && side == AnchorTipGeometry.BOTTOM) {
-      path.lineTo(l + o - a, t);
-      path.lineTo(l + o, t - a);
-      path.lineTo(l + o + a, t);
+      addArrow(l + o - a, t, l + o, t - a, l + o + a, t);
     }
     path.lineTo(l + w - r, t);
     path.arcTo(new RectF(l + w - 2 * r, t, l + w, t + 2 * r), -90, 90);
     if (arrow && side == AnchorTipGeometry.LEFT) {
-      path.lineTo(l + w, t + o - a);
-      path.lineTo(l + w + a, t + o);
-      path.lineTo(l + w, t + o + a);
+      addArrow(l + w, t + o - a, l + w + a, t + o, l + w, t + o + a);
     }
     path.lineTo(l + w, t + h - r);
     path.arcTo(new RectF(l + w - 2 * r, t + h - 2 * r, l + w, t + h), 0, 90);
     if (arrow && side == AnchorTipGeometry.TOP) {
-      path.lineTo(l + o + a, t + h);
-      path.lineTo(l + o, t + h + a);
-      path.lineTo(l + o - a, t + h);
+      addArrow(l + o + a, t + h, l + o, t + h + a, l + o - a, t + h);
     }
     path.lineTo(l + r, t + h);
     path.arcTo(new RectF(l, t + h - 2 * r, l + 2 * r, t + h), 90, 90);
     if (arrow && side == AnchorTipGeometry.RIGHT) {
-      path.lineTo(l, t + o + a);
-      path.lineTo(l - a, t + o);
-      path.lineTo(l, t + o - a);
+      addArrow(l, t + o + a, l - a, t + o, l, t + o - a);
     }
     path.lineTo(l, t + r);
     path.arcTo(new RectF(l, t, l + 2 * r, t + 2 * r), 180, 90);
     path.close();
+  }
+
+  /** Draws the arrow from (fx, fy) to the apex (ax, ay) to (tx, ty), with a rounded apex. */
+  private void addArrow(float fx, float fy, float ax, float ay, float tx, float ty) {
+    float length = (float) Math.hypot(ax - fx, ay - fy);
+    float k = length > 0 ? Math.max(0, 1 - dp(APEX_ROUNDING) / length) : 0;
+    path.lineTo(fx, fy);
+    path.lineTo(fx + (ax - fx) * k, fy + (ay - fy) * k);
+    path.quadTo(ax, ay, tx + (ax - tx) * k, ty + (ay - ty) * k);
+    path.lineTo(tx, ty);
   }
 
   // Touches
@@ -364,14 +420,33 @@ final class AnchorTipView extends ViewGroup {
 
   // Animation
 
+  /** Offset toward the anchor while hidden: `{ x, y }` in pixels. */
+  private float[] hiddenTravel() {
+    float travel = dp(TRAVEL);
+    switch (side) {
+      case AnchorTipGeometry.TOP:
+        return new float[] {0, travel};
+      case AnchorTipGeometry.BOTTOM:
+        return new float[] {0, -travel};
+      case AnchorTipGeometry.LEFT:
+        return new float[] {travel, 0};
+      default:
+        return new float[] {-travel, 0};
+    }
+  }
+
   void animateIn() {
     if ("none".equals(config.animation)) return;
     boolean scale = "scale".equals(config.animation);
+    float[] travel = scale ? hiddenTravel() : new float[] {0, 0};
     setAlpha(0f);
-    setScaleX(scale ? 0.9f : 1f);
-    setScaleY(scale ? 0.9f : 1f);
-    animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(220)
-        .setInterpolator(new DecelerateInterpolator()).setListener(null).start();
+    setScaleX(scale ? 0.94f : 1f);
+    setScaleY(scale ? 0.94f : 1f);
+    setTranslationX(travel[0]);
+    setTranslationY(travel[1]);
+    // 240ms on cubic-bezier(0.2, 0.9, 0.3, 1), matching the React and iOS renderers.
+    animate().alpha(1f).scaleX(1f).scaleY(1f).translationX(0f).translationY(0f).setDuration(240)
+        .setInterpolator(new PathInterpolator(0.2f, 0.9f, 0.3f, 1f)).setListener(null).start();
   }
 
   void animateOut(final Runnable completion) {
@@ -380,7 +455,11 @@ final class AnchorTipView extends ViewGroup {
       return;
     }
     boolean scale = "scale".equals(config.animation);
-    animate().alpha(0f).scaleX(scale ? 0.9f : 1f).scaleY(scale ? 0.9f : 1f).setDuration(150)
+    float[] travel = scale ? hiddenTravel() : new float[] {0, 0};
+    // 140ms on cubic-bezier(0.4, 0, 1, 1).
+    animate().alpha(0f).scaleX(scale ? 0.96f : 1f).scaleY(scale ? 0.96f : 1f)
+        .translationX(travel[0]).translationY(travel[1]).setDuration(140)
+        .setInterpolator(new PathInterpolator(0.4f, 0f, 1f, 1f))
         .setListener(new AnimatorListenerAdapter() {
           @Override
           public void onAnimationEnd(Animator animation) {

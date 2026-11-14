@@ -4,10 +4,14 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { TipAnchor, TipHost, tips, type TipOptions, type TourStep } from 'react-native-anchor-tips';
 
 /**
- * Screenshot scripts, selected with a launch argument on iOS:
- * `xcrun simctl launch booted org.reactjs.native.example.AnchorTipsExample -demo gallery`
+ * Screenshot scripts, selected with a launch argument:
+ * - iOS: `xcrun simctl launch booted org.reactjs.native.example.AnchorTipsExample -demo gallery`
+ * - Android: `adb shell am start -n com.anchortipsexample/.MainActivity --es demo gallery`
+ *
+ * On Android the value arrives as the root `demo` prop, which App copies here
+ * before the first render.
  */
-const DEMO = Platform.OS === 'ios' ? (Settings.get('demo') as string | undefined) : undefined;
+let DEMO = Platform.OS === 'ios' ? (Settings.get('demo') as string | undefined) : undefined;
 
 const runtime = globalThis as { RN$Bridgeless?: boolean; __turboModuleProxy?: unknown };
 const ARCHITECTURE =
@@ -53,7 +57,7 @@ function useDemoScript() {
         tips.show('profile', {
           presentation: 'native',
           variant: 'inverted',
-          title: 'Drawn by UIKit',
+          title: Platform.OS === 'ios' ? 'Drawn by UIKit' : 'Drawn by Android views',
           placement: 'top',
           showCloseButton: false,
         }),
@@ -139,7 +143,8 @@ function Demo() {
   );
 }
 
-export default function App() {
+export default function App({ demo }: { demo?: string }) {
+  if (DEMO === undefined && demo) DEMO = demo;
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />

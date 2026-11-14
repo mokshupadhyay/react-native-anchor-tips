@@ -6,7 +6,7 @@ import {
   resolveTheme,
   resolveTipOptions,
 } from '../core/resolve';
-import { resolveTipVisuals } from '../theme/themes';
+import { resolveLineHeights, resolveTipVisuals } from '../theme/themes';
 
 type NativeValue = string | number | boolean | null | NativeObject | NativeValue[];
 interface NativeObject {
@@ -34,6 +34,7 @@ export function serializeNativeTip(record: TipRecord, config: TipConfig, scheme:
   const theme = resolveTheme(config, scheme, options.theme);
   const visuals = resolveTipVisuals(theme, options.variant ?? theme.variant);
   const { layout, typography, shadow } = theme;
+  const lineHeights = resolveLineHeights(typography);
   const anchor = record.anchorRect ?? { x: 0, y: 0, width: 0, height: 0 };
 
   return {
@@ -79,7 +80,9 @@ export function serializeNativeTip(record: TipRecord, config: TipConfig, scheme:
       fontFamily: typography.fontFamily ?? null,
       titleFontSize: typography.titleSize,
       titleFontWeight: fontWeight(typography.titleWeight),
+      titleLineHeight: lineHeights.title,
       messageFontSize: typography.messageSize,
+      messageLineHeight: lineHeights.message,
       actionFontSize: typography.actionSize,
       actionFontWeight: fontWeight(typography.actionWeight),
       stepFontSize: typography.stepSize,

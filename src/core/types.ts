@@ -120,7 +120,11 @@ export interface TipTheme {
     fontFamily?: string;
     titleSize: number;
     titleWeight: TextStyle['fontWeight'];
+    /** Defaults to 20. */
+    titleLineHeight?: number;
     messageSize: number;
+    /** Defaults to 1.35 × `messageSize`. */
+    messageLineHeight?: number;
     actionSize: number;
     actionWeight: TextStyle['fontWeight'];
     stepSize: number;

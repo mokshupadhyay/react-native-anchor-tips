@@ -1349,7 +1349,7 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - react-native-anchor-tips (0.1.0-beta.0):
+  - react-native-anchor-tips (0.2.0):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2159,7 +2159,7 @@ SPEC CHECKSUMS:
   React-Mapbuffer: a2dae4f2cb335ebb97f2240494d0c2bab84cd339
   React-microtasksnativemodule: 8b3aaa5f3b907ecf071b105589868d9f027a448d
   React-mutationobservernativemodule: 11d77d3f7360578f07847843544ada23cc473049
-  react-native-anchor-tips: 65d8b34261ba3402c5c28a08212abe6b5e0b7c5b
+  react-native-anchor-tips: 634c174191cc296f72f2dc1f6e9049210fefc47d
   react-native-safe-area-context: b1c9f15a36e597e9cef4c5526e209ef2645bc2e0
   React-NativeModulesApple: 52f3def085f129de1307e3eb78e26729ff70f421
   React-networking: 1e6441349ac72bfd4f7a79c300c3dd76993a7058
@@ -2203,4 +2203,4 @@ SPEC CHECKSUMS:
 
 PODFILE CHECKSUM: ba83fc13752e0ced5de199ca11688c3757a12e0a
 
-COCOAPODS: 1.16.2
+COCOAPODS: 1.15.2

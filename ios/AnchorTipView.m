@@ -1,5 +1,6 @@
 #import "AnchorTipView.h"
 
+#import <CoreText/CoreText.h>
 #import <React/RCTConvert.h>
 
 static CGFloat AnchorTipNumber(NSDictionary *dict, NSString *key, CGFloat fallback)
@@ -39,14 +40,94 @@ static UIFontWeight AnchorTipFontWeight(NSString *_Nullable weight)
   return UIFontWeightRegular;
 }
 
+/** Largest Dynamic Type scale applied to tip text. */
+static const CGFloat AnchorTipMaxFontScale = 1.35;
+
+/** Scales a font with Dynamic Type, up to `AnchorTipMaxFontScale`. */
+static UIFont *AnchorTipScaled(UIFont *font, CGFloat size)
+{
+  return [[UIFontMetrics defaultMetrics] scaledFontForFont:font maximumPointSize:size * AnchorTipMaxFontScale];
+}
+
 static UIFont *AnchorTipFont(NSString *_Nullable family, CGFloat size, NSString *_Nullable weight)
 {
   if (family != nil) {
     UIFont *custom = [UIFont fontWithName:family size:size];
-    if (custom != nil) return custom;
+    if (custom != nil) return AnchorTipScaled(custom, size);
   }
-  return [UIFont systemFontOfSize:size weight:AnchorTipFontWeight(weight)];
+  return AnchorTipScaled([UIFont systemFontOfSize:size weight:AnchorTipFontWeight(weight)], size);
 }
+
+/** Like `AnchorTipFont`, with digits of equal width so a step counter keeps its width. */
+static UIFont *AnchorTipTabularFont(NSString *_Nullable family, CGFloat size, NSString *_Nullable weight)
+{
+  UIFont *base = nil;
+  if (family != nil) base = [UIFont fontWithName:family size:size];
+  if (base == nil) base = [UIFont systemFontOfSize:size weight:AnchorTipFontWeight(weight)];
+  UIFontDescriptor *descriptor = [base.fontDescriptor fontDescriptorByAddingAttributes:@{
+    UIFontDescriptorFeatureSettingsAttribute : @[ @{
+      UIFontFeatureTypeIdentifierKey : @(kNumberSpacingType),
+      UIFontFeatureSelectorIdentifierKey : @(kMonospacedNumbersSelector),
+    } ],
+  }];
+  return AnchorTipScaled([UIFont fontWithDescriptor:descriptor size:size], size);
+}
+
+/** Text with a fixed line height that grows with the font's Dynamic Type scale. */
+static NSAttributedString *AnchorTipText(NSString *text, UIFont *font, CGFloat size, CGFloat lineHeight, UIColor *color)
+{
+  NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
+  CGFloat scaled = round(lineHeight * (size > 0 ? font.pointSize / size : 1));
+  paragraph.minimumLineHeight = scaled;
+  paragraph.maximumLineHeight = scaled;
+  return [[NSAttributedString alloc] initWithString:text
+                                         attributes:@{
+                                           NSFontAttributeName : font,
+                                           NSForegroundColorAttributeName : color,
+                                           NSParagraphStyleAttributeName : paragraph,
+                                         }];
+}
+
+/** Radius of the rounded arrow apex, measured along each arrow edge. */
+static const CGFloat AnchorTipApexRounding = 2;
+
+/** Draws the arrow from `from` to `apex` to `to`, with a rounded apex. */
+static void AnchorTipAddArrow(UIBezierPath *path, CGPoint from, CGPoint apex, CGPoint to)
+{
+  CGFloat length = hypot(apex.x - from.x, apex.y - from.y);
+  CGFloat t = length > 0 ? MAX(0, 1 - AnchorTipApexRounding / length) : 0;
+  CGPoint before = CGPointMake(from.x + (apex.x - from.x) * t, from.y + (apex.y - from.y) * t);
+  CGPoint after = CGPointMake(to.x + (apex.x - to.x) * t, to.y + (apex.y - to.y) * t);
+  [path addLineToPoint:from];
+  [path addLineToPoint:before];
+  [path addQuadCurveToPoint:after controlPoint:apex];
+  [path addLineToPoint:to];
+}
+
+/** The close button: a 28pt box that overhangs the row like the React version, with a 44pt touch target. */
+@interface AnchorTipCloseButton : UIButton
+@end
+
+@implementation AnchorTipCloseButton
+
+- (CGSize)intrinsicContentSize
+{
+  // In alignment-rect terms; see `alignmentRectInsets`.
+  return CGSizeMake(22, 24);
+}
+
+- (UIEdgeInsets)alignmentRectInsets
+{
+  // The 28pt frame sits 4pt above the row and 6pt past its trailing edge.
+  return UIEdgeInsetsMake(4, 0, 0, 6);
+}
+
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event
+{
+  return CGRectContainsPoint(CGRectInset(self.bounds, -8, -8), point);
+}
+
+@end
 
 /** Rounded rect with the arrow notched into the edge that faces the anchor, clockwise. */
 static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipSide side, CGFloat offset, CGFloat arrow)
@@ -58,36 +139,40 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   UIBezierPath *path = [UIBezierPath bezierPath];
   [path moveToPoint:CGPointMake(r, 0)];
   if (hasArrow && side == AnchorTipSideBottom) {
-    [path addLineToPoint:CGPointMake(offset - arrow, 0)];
-    [path addLineToPoint:CGPointMake(offset, -arrow)];
-    [path addLineToPoint:CGPointMake(offset + arrow, 0)];
+    AnchorTipAddArrow(path, CGPointMake(offset - arrow, 0), CGPointMake(offset, -arrow), CGPointMake(offset + arrow, 0));
   }
   [path addLineToPoint:CGPointMake(w - r, 0)];
   [path addArcWithCenter:CGPointMake(w - r, r) radius:r startAngle:-M_PI_2 endAngle:0 clockwise:YES];
   if (hasArrow && side == AnchorTipSideLeft) {
-    [path addLineToPoint:CGPointMake(w, offset - arrow)];
-    [path addLineToPoint:CGPointMake(w + arrow, offset)];
-    [path addLineToPoint:CGPointMake(w, offset + arrow)];
+    AnchorTipAddArrow(path, CGPointMake(w, offset - arrow), CGPointMake(w + arrow, offset), CGPointMake(w, offset + arrow));
   }
   [path addLineToPoint:CGPointMake(w, h - r)];
   [path addArcWithCenter:CGPointMake(w - r, h - r) radius:r startAngle:0 endAngle:M_PI_2 clockwise:YES];
   if (hasArrow && side == AnchorTipSideTop) {
-    [path addLineToPoint:CGPointMake(offset + arrow, h)];
-    [path addLineToPoint:CGPointMake(offset, h + arrow)];
-    [path addLineToPoint:CGPointMake(offset - arrow, h)];
+    AnchorTipAddArrow(path, CGPointMake(offset + arrow, h), CGPointMake(offset, h + arrow), CGPointMake(offset - arrow, h));
   }
   [path addLineToPoint:CGPointMake(r, h)];
   [path addArcWithCenter:CGPointMake(r, h - r) radius:r startAngle:M_PI_2 endAngle:M_PI clockwise:YES];
   if (hasArrow && side == AnchorTipSideRight) {
-    [path addLineToPoint:CGPointMake(0, offset + arrow)];
-    [path addLineToPoint:CGPointMake(-arrow, offset)];
-    [path addLineToPoint:CGPointMake(0, offset - arrow)];
+    AnchorTipAddArrow(path, CGPointMake(0, offset + arrow), CGPointMake(-arrow, offset), CGPointMake(0, offset - arrow));
   }
   [path addLineToPoint:CGPointMake(0, r)];
   [path addArcWithCenter:CGPointMake(r, r) radius:r startAngle:M_PI endAngle:3 * M_PI_2 clockwise:YES];
   [path closePath];
   return path;
 }
+
+/** A primary action that keeps a full pill shape at whatever height Auto Layout gives it. */
+@interface AnchorTipPillButton : UIButton
+@end
+
+@implementation AnchorTipPillButton
+- (void)layoutSubviews
+{
+  [super layoutSubviews];
+  self.layer.cornerRadius = self.bounds.size.height / 2;
+}
+@end
 
 @implementation AnchorTipView {
   NSDictionary *_style;
@@ -99,7 +184,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   UIStackView *_textStack;
   UILabel *_titleLabel;
   UILabel *_messageLabel;
-  UIButton *_closeButton;
+  AnchorTipCloseButton *_closeButton;
   UIStackView *_footer;
   UILabel *_stepLabel;
   UIStackView *_actionsStack;
@@ -138,7 +223,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   _content.translatesAutoresizingMaskIntoConstraints = NO;
   _content.axis = UILayoutConstraintAxisVertical;
   _content.alignment = UIStackViewAlignmentFill;
-  _content.spacing = 12;
+  _content.spacing = 14;
   [self addSubview:_content];
   _paddingConstraints = @[
     [_content.topAnchor constraintEqualToAnchor:self.topAnchor constant:14],
@@ -162,7 +247,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   _textStack = [UIStackView new];
   _textStack.axis = UILayoutConstraintAxisVertical;
   _textStack.alignment = UIStackViewAlignmentLeading;
-  _textStack.spacing = 3;
+  _textStack.spacing = 2;
   [_textStack setContentHuggingPriority:UILayoutPriorityDefaultLow forAxis:UILayoutConstraintAxisHorizontal];
   _titleLabel = [UILabel new];
   _titleLabel.numberOfLines = 0;
@@ -171,10 +256,11 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   [_textStack addArrangedSubview:_titleLabel];
   [_textStack addArrangedSubview:_messageLabel];
   [_row addArrangedSubview:_textStack];
+  [_row setCustomSpacing:8 afterView:_textStack];
 
-  _closeButton = [UIButton buttonWithType:UIButtonTypeSystem];
+  _closeButton = [AnchorTipCloseButton buttonWithType:UIButtonTypeSystem];
   [_closeButton setTitle:@"\u2715" forState:UIControlStateNormal];
-  _closeButton.titleLabel.font = [UIFont systemFontOfSize:14];
+  _closeButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
   _closeButton.accessibilityLabel = @"Dismiss";
   [_closeButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
   [_closeButton setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
@@ -194,7 +280,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   _actionsStack = [UIStackView new];
   _actionsStack.axis = UILayoutConstraintAxisHorizontal;
   _actionsStack.alignment = UIStackViewAlignmentCenter;
-  _actionsStack.spacing = 16;
+  _actionsStack.spacing = 20;
   [_actionsStack setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
   [_footer addArrangedSubview:_actionsStack];
 }
@@ -218,9 +304,10 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
 
   if (AnchorTipBool(style, @"shadowEnabled", YES)) {
     self.layer.shadowColor = AnchorTipColor(style, @"shadowColor", UIColor.blackColor).CGColor;
-    self.layer.shadowOpacity = AnchorTipNumber(style, @"shadowOpacity", 0.16);
-    self.layer.shadowRadius = AnchorTipNumber(style, @"shadowRadius", 16) / 2.0;
-    self.layer.shadowOffset = CGSizeMake(0, AnchorTipNumber(style, @"shadowOffsetY", 6));
+    self.layer.shadowOpacity = AnchorTipNumber(style, @"shadowOpacity", 0.12);
+    // Halved like the React renderer, which passes `shadow.radius / 2` to the same CALayer property.
+    self.layer.shadowRadius = AnchorTipNumber(style, @"shadowRadius", 20) / 2.0;
+    self.layer.shadowOffset = CGSizeMake(0, AnchorTipNumber(style, @"shadowOffsetY", 8));
   } else {
     self.layer.shadowOpacity = 0;
   }
@@ -234,27 +321,25 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
 
   NSString *title = AnchorTipString(config, @"title");
   _titleLabel.hidden = title == nil;
-  _titleLabel.text = title;
-  _titleLabel.textColor = AnchorTipColor(style, @"titleColor", UIColor.blackColor);
-  _titleLabel.font = AnchorTipFont(fontFamily, AnchorTipNumber(style, @"titleFontSize", 15), AnchorTipString(style, @"titleFontWeight"));
+  CGFloat titleSize = AnchorTipNumber(style, @"titleFontSize", 15);
+  _titleLabel.attributedText = title == nil
+      ? nil
+      : AnchorTipText(title,
+                      AnchorTipFont(fontFamily, titleSize, AnchorTipString(style, @"titleFontWeight")),
+                      titleSize,
+                      AnchorTipNumber(style, @"titleLineHeight", 20),
+                      AnchorTipColor(style, @"titleColor", UIColor.blackColor));
 
   NSString *message = AnchorTipString(config, @"message");
   _messageLabel.hidden = message == nil;
   CGFloat messageSize = AnchorTipNumber(style, @"messageFontSize", 14);
-  if (message != nil) {
-    NSMutableParagraphStyle *paragraph = [NSMutableParagraphStyle new];
-    paragraph.minimumLineHeight = round(messageSize * 1.35);
-    paragraph.maximumLineHeight = round(messageSize * 1.35);
-    _messageLabel.attributedText = [[NSAttributedString alloc]
-        initWithString:message
-            attributes:@{
-              NSFontAttributeName : AnchorTipFont(fontFamily, messageSize, @"400"),
-              NSForegroundColorAttributeName : AnchorTipColor(style, @"messageColor", UIColor.darkGrayColor),
-              NSParagraphStyleAttributeName : paragraph,
-            }];
-  } else {
-    _messageLabel.attributedText = nil;
-  }
+  _messageLabel.attributedText = message == nil
+      ? nil
+      : AnchorTipText(message,
+                      AnchorTipFont(fontFamily, messageSize, @"400"),
+                      messageSize,
+                      AnchorTipNumber(style, @"messageLineHeight", round(messageSize * 1.35)),
+                      AnchorTipColor(style, @"messageColor", UIColor.darkGrayColor));
 
   _closeButton.hidden = !AnchorTipBool(config, @"showCloseButton", YES);
   _closeButton.tintColor = AnchorTipColor(style, @"closeColor", UIColor.grayColor);
@@ -262,7 +347,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   NSString *step = AnchorTipString(config, @"stepLabel");
   _stepLabel.text = step;
   _stepLabel.textColor = AnchorTipColor(style, @"stepColor", UIColor.grayColor);
-  _stepLabel.font = AnchorTipFont(fontFamily, AnchorTipNumber(style, @"stepFontSize", 13), @"400");
+  _stepLabel.font = AnchorTipTabularFont(fontFamily, AnchorTipNumber(style, @"stepFontSize", 13), @"500");
 
   [self rebuildActions:config style:style fontFamily:fontFamily];
   _footer.hidden = step == nil && _actionsStack.arrangedSubviews.count == 0;
@@ -280,23 +365,28 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   }
   [_primaryButtons removeAllObjects];
   NSArray *actions = [config[@"actions"] isKindOfClass:[NSArray class]] ? config[@"actions"] : @[];
-  CGFloat size = AnchorTipNumber(style, @"actionFontSize", 15);
+  CGFloat size = AnchorTipNumber(style, @"actionFontSize", 14);
+  UIButton *previous = nil;
   NSString *weight = AnchorTipString(style, @"actionFontWeight");
   for (NSUInteger index = 0; index < actions.count; index++) {
     NSDictionary *action = actions[index];
     if (![action isKindOfClass:[NSDictionary class]]) continue;
     NSString *actionStyle = AnchorTipString(action, @"style") ?: @"default";
     BOOL primary = [actionStyle isEqualToString:@"primary"];
-    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    BOOL cancel = [actionStyle isEqualToString:@"cancel"];
+    UIButton *button = primary ? [AnchorTipPillButton buttonWithType:UIButtonTypeSystem]
+                               : [UIButton buttonWithType:UIButtonTypeSystem];
+    // Hierarchy: a filled primary, colored default and destructive actions, and a neutral cancel.
     UIColor *color = primary ? AnchorTipColor(style, @"primaryTextColor", UIColor.whiteColor)
         : [actionStyle isEqualToString:@"destructive"] ? AnchorTipColor(style, @"destructiveColor", UIColor.systemRedColor)
-                                                        : AnchorTipColor(style, @"actionColor", UIColor.systemBlueColor);
+        : cancel                                         ? AnchorTipColor(style, @"messageColor", UIColor.darkGrayColor)
+                                                         : AnchorTipColor(style, @"actionColor", UIColor.systemBlueColor);
     [button setTitle:AnchorTipString(action, @"label") forState:UIControlStateNormal];
     [button setTitleColor:color forState:UIControlStateNormal];
-    button.titleLabel.font = AnchorTipFont(fontFamily, size, [actionStyle isEqualToString:@"cancel"] ? @"400" : weight);
+    button.titleLabel.font = AnchorTipFont(fontFamily, size, cancel ? @"500" : weight);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    button.contentEdgeInsets = primary ? UIEdgeInsetsMake(7, 14, 7, 14) : UIEdgeInsetsMake(4, 0, 4, 0);
+    button.contentEdgeInsets = primary ? UIEdgeInsetsMake(8, 16, 8, 16) : UIEdgeInsetsMake(6, 0, 6, 0);
 #pragma clang diagnostic pop
     if (primary) {
       button.backgroundColor = AnchorTipColor(style, @"primaryBackgroundColor", UIColor.systemBlueColor);
@@ -306,6 +396,9 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
     button.tag = (NSInteger)index;
     [button addTarget:self action:@selector(handleAction:) forControlEvents:UIControlEventTouchUpInside];
     [_actionsStack addArrangedSubview:button];
+    // 12pt before a primary button, 20pt before a text action, as in the React renderer.
+    if (previous != nil) [_actionsStack setCustomSpacing:primary ? 12 : 20 afterView:previous];
+    previous = button;
   }
   _actionsStack.hidden = _actionsStack.arrangedSubviews.count == 0;
 }
@@ -323,7 +416,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
 
   CGFloat textWidth = inner;
   if (!_iconLabel.hidden) textWidth -= _iconLabel.intrinsicContentSize.width + _row.spacing;
-  if (!_closeButton.hidden) textWidth -= _closeButton.intrinsicContentSize.width + _row.spacing;
+  if (!_closeButton.hidden) textWidth -= _closeButton.intrinsicContentSize.width + [_row customSpacingAfterView:_textStack];
   _titleLabel.preferredMaxLayoutWidth = MAX(0, textWidth);
   _messageLabel.preferredMaxLayoutWidth = MAX(0, textWidth);
 
@@ -347,7 +440,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
 - (void)updateShape
 {
   BOOL showArrow = AnchorTipBool(_config, @"showArrow", YES);
-  CGFloat arrow = showArrow ? AnchorTipNumber(_style, @"arrowSize", 8) : 0;
+  CGFloat arrow = showArrow ? AnchorTipNumber(_style, @"arrowSize", 7) : 0;
   CGFloat radius = AnchorTipNumber(_style, @"borderRadius", 14);
   UIBezierPath *path = AnchorTipBubblePath(self.bounds.size, radius, _side, _arrowOffset, arrow);
   [CATransaction begin];
@@ -398,11 +491,11 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
   return AnchorTipString(_config, @"animation") ?: @"scale";
 }
 
-/** Slightly shrunk and pulled toward the anchor. */
-- (CGAffineTransform)hiddenTransform
+/** Slightly shrunk to `scale` and pulled toward the anchor. */
+- (CGAffineTransform)hiddenTransformWithScale:(CGFloat)scale
 {
   if (![[self animationPreset] isEqualToString:@"scale"]) return CGAffineTransformIdentity;
-  CGFloat travel = 8;
+  CGFloat travel = 6;
   CGFloat dx = 0;
   CGFloat dy = 0;
   switch (_side) {
@@ -419,7 +512,7 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
       dx = -travel;
       break;
   }
-  return CGAffineTransformScale(CGAffineTransformMakeTranslation(dx, dy), 0.9, 0.9);
+  return CGAffineTransformScale(CGAffineTransformMakeTranslation(dx, dy), scale, scale);
 }
 
 - (void)animateIn
@@ -430,17 +523,17 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
     return;
   }
   self.alpha = 0;
-  self.transform = [self hiddenTransform];
-  [UIView animateWithDuration:0.32
-                        delay:0
-       usingSpringWithDamping:0.85
-        initialSpringVelocity:0.3
-                      options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
-                   animations:^{
-                     self.alpha = 1;
-                     self.transform = CGAffineTransformIdentity;
-                   }
-                   completion:nil];
+  self.transform = [self hiddenTransformWithScale:0.94];
+  // 240ms on cubic-bezier(0.2, 0.9, 0.3, 1), matching the React and Android renderers.
+  UICubicTimingParameters *timing = [[UICubicTimingParameters alloc] initWithControlPoint1:CGPointMake(0.2, 0.9)
+                                                                             controlPoint2:CGPointMake(0.3, 1)];
+  UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:0.24 timingParameters:timing];
+  animator.userInteractionEnabled = YES;
+  [animator addAnimations:^{
+    self.alpha = 1;
+    self.transform = CGAffineTransformIdentity;
+  }];
+  [animator startAnimation];
 }
 
 - (void)animateOutWithCompletion:(void (^)(void))completion
@@ -449,16 +542,18 @@ static UIBezierPath *AnchorTipBubblePath(CGSize size, CGFloat radius, AnchorTipS
     completion();
     return;
   }
-  [UIView animateWithDuration:0.15
-      delay:0
-      options:UIViewAnimationOptionCurveEaseIn | UIViewAnimationOptionBeginFromCurrentState
-      animations:^{
-        self.alpha = 0;
-        self.transform = [self hiddenTransform];
-      }
-      completion:^(__unused BOOL finished) {
-        completion();
-      }];
+  // 140ms on cubic-bezier(0.4, 0, 1, 1).
+  UICubicTimingParameters *timing = [[UICubicTimingParameters alloc] initWithControlPoint1:CGPointMake(0.4, 0)
+                                                                             controlPoint2:CGPointMake(1, 1)];
+  UIViewPropertyAnimator *animator = [[UIViewPropertyAnimator alloc] initWithDuration:0.14 timingParameters:timing];
+  [animator addAnimations:^{
+    self.alpha = 0;
+    self.transform = [self hiddenTransformWithScale:0.96];
+  }];
+  [animator addCompletion:^(__unused UIViewAnimatingPosition position) {
+    completion();
+  }];
+  [animator startAnimation];
 }
 
 @end

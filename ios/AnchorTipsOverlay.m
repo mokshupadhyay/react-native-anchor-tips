@@ -231,18 +231,18 @@ static UIWindow *_Nullable AnchorTipsHostKeyWindow(UIWindow *_Nullable excluded)
       AnchorTipsString(config, @"placement", @"auto"),
       AnchorTipsString(config, @"align", @"center"),
       AnchorTipsNumber(style, @"offset", 4),
-      showArrow ? AnchorTipsNumber(style, @"arrowSize", 8) : 0,
+      showArrow ? AnchorTipsNumber(style, @"arrowSize", 7) : 0,
       margin,
       AnchorTipsNumber(style, @"borderRadius", 14));
   [view applyPlacement:placement size:size];
 
   AnchorTipBackdropView *backdrop = _backdrops[tipId];
   if (backdrop != nil) {
-    CGFloat padding = AnchorTipsNumber(style, @"spotlightPadding", 6);
+    CGFloat padding = AnchorTipsNumber(style, @"spotlightPadding", 8);
     id rawColor = style[@"backdropColor"];
     UIColor *color = rawColor != nil && rawColor != [NSNull null] ? [RCTConvert UIColor:rawColor] : nil;
     [backdrop setHole:CGRectInset(anchor, -padding, -padding)
-               radius:AnchorTipsNumber(style, @"spotlightRadius", 12)
+               radius:AnchorTipsNumber(style, @"spotlightRadius", 16)
                 color:color ?: [UIColor colorWithWhite:0 alpha:0.55]];
   }
 }

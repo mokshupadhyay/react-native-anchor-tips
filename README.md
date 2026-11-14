@@ -6,12 +6,31 @@
 
 Tooltips, tips and guided tours anchored to any view in React Native, on the old and the New Architecture.
 
+### iOS
+
 <table>
   <tr>
     <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/gallery.png" width="200" alt="A card tip with an action below a compose button, a filled tip pointing at a star, and a dark tooltip above a tab" /></td>
     <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/tour.png" width="200" alt="Step 2 of a guided tour with a spotlight on the compose button" /></td>
     <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/native.png" width="200" alt="The same tips drawn natively by UIKit" /></td>
     <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/native-tour.png" width="200" alt="A native tour step with a rounded spotlight on the search button" /></td>
+  </tr>
+  <tr>
+    <td align="center">Tips</td>
+    <td align="center">Tour with spotlight</td>
+    <td align="center">Native tips</td>
+    <td align="center">Native tour</td>
+  </tr>
+</table>
+
+### Android
+
+<table>
+  <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/android-gallery.png" width="200" alt="The same tips rendered with React on Android" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/android-tour.png" width="200" alt="Step 2 of a guided tour on Android with Skip, Back and Next" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/android-native.png" width="200" alt="Tips drawn natively by Android views" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/mokshupadhyay/react-native-anchor-tips/main/docs/screenshots/android-native-tour.png" width="200" alt="A native tour step on Android with a spotlight on the search button" /></td>
   </tr>
   <tr>
     <td align="center">Tips</td>
@@ -36,6 +55,8 @@ cd ios && pod install
 ```
 
 It has been run on React Native 0.88 (New Architecture) on the iOS simulator and an Android API 37 emulator. Please [report issues](https://github.com/mokshupadhyay/react-native-anchor-tips/issues), especially from older React Native releases and physical Android devices.
+
+Version 0.2.0 refreshed the default look on all three renderers. It uses neutral colors that meet WCAG AA contrast, a clear action hierarchy (a filled primary pill, with Skip and Back in gray), 44pt touch targets, a rounded arrow and matching motion. Your theme overrides still apply on top.
 
 Android links automatically. React-rendered tips need no native code, so they also work in Expo Go. Native presentation requires a development build or a bare app.
 
@@ -261,4 +282,4 @@ npm test
 npm run build
 ```
 
-`example/` is a React Native 0.88 app. `npm run example:install` packs the library and installs it there the way a consumer would, then `cd example/ios && bundle exec pod install`. On iOS, launch it with `-demo gallery`, `-demo tour`, `-demo native` or `-demo native-tour` to run scripted screenshots.
+`example/` is a React Native 0.88 app. `npm run example:install` packs the library and installs it there the way a consumer would, then `cd example/ios && bundle exec pod install`. To run the scripted screenshots, launch it with `-demo gallery`, `-demo tour`, `-demo native` or `-demo native-tour` on iOS (`xcrun simctl launch booted org.reactjs.native.example.AnchorTipsExample -demo gallery`), or `--es demo gallery` on Android (`adb shell am start -n com.anchortipsexample/.MainActivity --es demo gallery`).
