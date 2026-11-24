@@ -283,3 +283,7 @@ npm run build
 ```
 
 `example/` is a React Native 0.88 app. `npm run example:install` packs the library and installs it there the way a consumer would, then `cd example/ios && bundle exec pod install`. To run the scripted screenshots, launch it with `-demo gallery`, `-demo tour`, `-demo native` or `-demo native-tour` on iOS (`xcrun simctl launch booted org.reactjs.native.example.AnchorTipsExample -demo gallery`), or `--es demo gallery` on Android (`adb shell am start -n com.anchortipsexample/.MainActivity --es demo gallery`).
+
+## Author
+
+Built and maintained by [Moksh Upadhyay](https://mokshupadhyay.com).
